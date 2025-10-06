@@ -1,0 +1,6 @@
+@HUNting.API_HostAddress = http://localhost:5137
+
+GET {{HUNting.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

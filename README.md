@@ -1,2 +1,0 @@
-# HUNting
-Vadászaplikáció diplomatervhez
