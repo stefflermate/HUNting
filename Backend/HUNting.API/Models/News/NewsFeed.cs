@@ -1,26 +1,27 @@
 using HUNting.API.Models.Societies;
 using HUNting.API.Models.Users;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace HUNting.API.Models.News
 {
     public class NewsFeed
     {
-        [Key] public int NewsFeedId { get; set; }
+        [Key, Column("PostId")] public int NewsFeedId { get; set; }
 
         public int SocietyId { get; set; }
         public Society? Society { get; set; }
 
         public int AuthorUserId { get; set; }
-        public User? Author { get; set; }
+        public ApplicationUser? Author { get; set; }
 
-        [Required, MaxLength(300)] public string Title { get; set; } = "";
-        [MaxLength(4000)] public string? Content { get; set; }
-        [MaxLength(1000)] public string? ImageUrl { get; set; }
+        [MaxLength(200)] public string? Title { get; set; }
+        public string? Content { get; set; }
+        [MaxLength(400)] public string? ImageUrl { get; set; }
 
-        [MaxLength(30)] public string VisibilityCode { get; set; } = "PUBLIC";
+        [MaxLength(20)] public string VisibilityCode { get; set; } = "MEMBERS";
         public NewsVisibility? Visibility { get; set; }
 
-        public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

@@ -4,10 +4,10 @@ namespace HUNting.API.Services
 {
     public interface IUserService
     {
-        Task<IEnumerable<User>> GetAllAsync();
-        Task<User?> GetByIdAsync(int id);
-        Task AddAsync(User user);
-        Task UpdateAsync(User user);
+        Task<IEnumerable<ApplicationUser>> GetAllAsync();
+        Task<ApplicationUser?> GetByIdAsync(int id);
+        Task<ApplicationUser> CreateAsync(ApplicationUser user, string password, IEnumerable<string>? roles = null);
+        Task UpdateAsync(ApplicationUser user);
         Task DeleteAsync(int id);
     }
 }

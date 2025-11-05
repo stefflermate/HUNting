@@ -14,22 +14,50 @@ namespace HUNting.API.Controllers
 
         [HttpGet]
         public async Task<ActionResult<IEnumerable<NewsFeed>>> GetAll()
-            => Ok(await _ctx.NewsFeed.Include(n => n.Visibility).ToListAsync());
+            => Ok(await _ctx.NewsFeed
+                .Include(n => n.Visibility)
+                .Include(n => n.Society)
+                .Include(n => n.Author)
+                .ToListAsync());
 
         [HttpGet("{id:int}")]
         public async Task<ActionResult<NewsFeed>> Get(int id)
-            => (await _ctx.NewsFeed.FindAsync(id)) is { } n ? Ok(n) : NotFound();
+        {
+            var news = await _ctx.NewsFeed
+                .Include(n => n.Visibility)
+                .Include(n => n.Society)
+                .Include(n => n.Author)
+                .FirstOrDefaultAsync(n => n.NewsFeedId == id);
+
+            return news is null ? NotFound() : Ok(news);
+        }
 
         [HttpPost]
         public async Task<ActionResult<NewsFeed>> Create(NewsFeed news)
-        { _ctx.NewsFeed.Add(news); await _ctx.SaveChangesAsync(); return CreatedAtAction(nameof(Get), new { id = news.NewsFeedId }, news); }
+        {
+            news.CreatedAt = DateTime.UtcNow;
+            _ctx.NewsFeed.Add(news);
+            await _ctx.SaveChangesAsync();
+            return CreatedAtAction(nameof(Get), new { id = news.NewsFeedId }, news);
+        }
 
         [HttpPut("{id:int}")]
         public async Task<IActionResult> Update(int id, NewsFeed news)
-        { if (id != news.NewsFeedId) return BadRequest(); _ctx.NewsFeed.Update(news); await _ctx.SaveChangesAsync(); return NoContent(); }
+        {
+            if (id != news.NewsFeedId) return BadRequest();
+            _ctx.NewsFeed.Update(news);
+            await _ctx.SaveChangesAsync();
+            return NoContent();
+        }
 
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> Delete(int id)
-        { var n = await _ctx.NewsFeed.FindAsync(id); if (n == null) return NotFound(); _ctx.NewsFeed.Remove(n); await _ctx.SaveChangesAsync(); return NoContent(); }
+        {
+            var n = await _ctx.NewsFeed.FindAsync(id);
+            if (n == null) return NotFound();
+            _ctx.NewsFeed.Remove(n);
+            await _ctx.SaveChangesAsync();
+            return NoContent();
+        }
     }
 }

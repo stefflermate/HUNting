@@ -15,10 +15,21 @@ namespace HUNting.API.Services
             _repo = repo;
         }
 
-        public Task<IEnumerable<Society>> GetAllAsync() =>
-            _repo.GetAllAsync(s => s.Members);
+        public async Task<IEnumerable<Society>> GetAllAsync() =>
+            await _ctx.Societies
+                .Include(s => s.Members)
+                    .ThenInclude(m => m.User)
+                .Include(s => s.Members)
+                    .ThenInclude(m => m.Role)
+                .ToListAsync();
 
-        public Task<Society?> GetByIdAsync(int id) => _repo.GetByIdAsync(id);
+        public async Task<Society?> GetByIdAsync(int id) =>
+            await _ctx.Societies
+                .Include(s => s.Members)
+                    .ThenInclude(m => m.User)
+                .Include(s => s.Members)
+                    .ThenInclude(m => m.Role)
+                .FirstOrDefaultAsync(s => s.SocietyId == id);
 
         public async Task AddAsync(Society s) { await _repo.AddAsync(s); await _repo.SaveAsync(); }
         public async Task UpdateAsync(Society s) { _repo.Update(s); await _repo.SaveAsync(); }
