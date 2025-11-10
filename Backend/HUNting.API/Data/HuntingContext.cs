@@ -18,6 +18,8 @@ namespace HUNting.API.Data
         public DbSet<Society> Societies => Set<Society>();
         public DbSet<SocietyRole> SocietyRoles => Set<SocietyRole>();
         public DbSet<SocietyMember> SocietyMembers => Set<SocietyMember>();
+        public DbSet<SocietyMembershipRequest> SocietyMembershipRequests => Set<SocietyMembershipRequest>();
+        public DbSet<SocietyPost> SocietyPosts => Set<SocietyPost>();
 
         public DbSet<Ad> Ads => Set<Ad>();
         public DbSet<AdCategory> AdCategories => Set<AdCategory>();
@@ -66,6 +68,12 @@ namespace HUNting.API.Data
                 .Property(s => s.CreatedAt)
                 .HasDefaultValueSql("sysdatetime()");
 
+            modelBuilder.Entity<ApplicationUser>()
+                .HasOne(u => u.OwnedSociety)
+                .WithOne(s => s.Owner)
+                .HasForeignKey<Society>(s => s.OwnerUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             modelBuilder.Entity<SocietyMember>()
                 .HasKey(x => new { x.SocietyId, x.UserId });
 
@@ -90,6 +98,39 @@ namespace HUNting.API.Data
             modelBuilder.Entity<SocietyMember>()
                 .Property(m => m.JoinedAt)
                 .HasDefaultValueSql("sysdatetime()");
+
+            modelBuilder.Entity<SocietyMembershipRequest>()
+                .HasKey(r => new { r.SocietyId, r.UserId });
+
+            modelBuilder.Entity<SocietyMembershipRequest>()
+                .HasOne(r => r.Society)
+                .WithMany(s => s.MembershipRequests)
+                .HasForeignKey(r => r.SocietyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SocietyMembershipRequest>()
+                .HasOne(r => r.User)
+                .WithMany(u => u.MembershipRequests)
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<SocietyMembershipRequest>()
+                .HasOne(r => r.ProcessedBy)
+                .WithMany(u => u.ProcessedMembershipRequests)
+                .HasForeignKey(r => r.ProcessedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<SocietyPost>()
+                .HasOne(p => p.Society)
+                .WithMany(s => s.Posts)
+                .HasForeignKey(p => p.SocietyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SocietyPost>()
+                .HasOne(p => p.Author)
+                .WithMany()
+                .HasForeignKey(p => p.AuthorUserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<SocietyRole>()
                 .HasIndex(r => r.Name)

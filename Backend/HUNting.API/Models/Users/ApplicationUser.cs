@@ -15,7 +15,12 @@ namespace HUNting.API.Models.Users
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        public AccountType AccountType { get; set; } = AccountType.Person;
+        public Society? OwnedSociety { get; set; }
+
         public ICollection<SocietyMember> Societies { get; set; } = new List<SocietyMember>();
+        public ICollection<SocietyMembershipRequest> MembershipRequests { get; set; } = new List<SocietyMembershipRequest>();
+        public ICollection<SocietyMembershipRequest> ProcessedMembershipRequests { get; set; } = new List<SocietyMembershipRequest>();
         public ICollection<HuntingLog> HuntingLogs { get; set; } = new List<HuntingLog>();
     }
 }

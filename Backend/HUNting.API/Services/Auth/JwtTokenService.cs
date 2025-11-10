@@ -38,6 +38,8 @@ namespace HUNting.API.Services.Auth
                 claims.Add(new Claim(ClaimTypes.Role, role));
             }
 
+            claims.Add(new("account_type", user.AccountType.ToString()));
+
             var expires = DateTime.UtcNow.AddMinutes(_options.AccessTokenLifetimeMinutes);
 
             var jwt = new JwtSecurityToken(

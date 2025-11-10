@@ -13,5 +13,16 @@ namespace HUNting.API.Services
         Task<IEnumerable<SocietyMember>> GetMembersAsync(int societyId);
         Task AddMemberAsync(SocietyMember member);
         Task RemoveMemberAsync(int societyId, int userId);
+
+        Task<IEnumerable<Society>> GetByUserAsync(int userId);
+        Task<SocietyMembershipRequest> CreateMembershipRequestAsync(int societyId, int userId, string? message);
+        Task<IEnumerable<SocietyMembershipRequest>> GetMembershipRequestsAsync(int societyId);
+        Task<SocietyMembershipRequest?> GetMembershipRequestAsync(int societyId, int userId);
+        Task ApproveMembershipRequestAsync(int societyId, int userId, int approverUserId);
+        Task RejectMembershipRequestAsync(int societyId, int userId, int approverUserId);
+
+        Task<IEnumerable<SocietyPost>> GetPostsAsync(int societyId);
+        Task<SocietyPost> AddPostAsync(SocietyPost post);
+        Task RemovePostAsync(int societyId, int postId);
     }
 }

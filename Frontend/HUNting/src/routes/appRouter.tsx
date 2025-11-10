@@ -8,6 +8,8 @@ import { AdCreatePage } from "@/pages/Ads/AdCreatePage";
 import { AdEditPage } from "@/pages/Ads/AdEditPage";
 import { SocietiesPage } from "@/pages/Societies/SocietiesPage";
 import { SocietyDetailPage } from "@/pages/Societies/SocietyDetailPage";
+import { MySocietiesPage } from "@/pages/Societies/MySocietiesPage";
+import { SocietyManagementPage } from "@/pages/Societies/SocietyManagementPage";
 import { NewsPage } from "@/pages/News/NewsPage";
 import { HuntingLogsPage } from "@/pages/HuntingLogs/HuntingLogsPage";
 import { MapPage } from "@/pages/Map/MapPage";
@@ -29,6 +31,8 @@ export const appRouter = createBrowserRouter([
       { path: "ads/:adId", element: <AdDetailPage /> },
       { path: "ads/:adId/edit", element: <AdEditPage /> },
       { path: "societies", element: <SocietiesPage /> },
+      { path: "societies/mine", element: <MySocietiesPage /> },
+      { path: "societies/manage", element: <SocietyManagementPage /> },
       { path: "societies/:societyId", element: <SocietyDetailPage /> },
       { path: "map", element: <MapPage /> },
       { path: "news", element: <NewsPage /> },

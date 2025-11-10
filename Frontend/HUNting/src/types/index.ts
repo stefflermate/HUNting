@@ -4,12 +4,21 @@ export type UserRole =
   | "Hunter"
   | "Guest";
 
+export type AccountType = "Person" | "Society";
+
+export interface OwnedSocietySummary {
+  societyId: number;
+  name: string;
+}
+
 export interface AuthUser {
   id: number;
   name: string;
   email: string;
   phone?: string;
   roles: UserRole[];
+  accountType: AccountType;
+  ownedSociety?: OwnedSocietySummary | null;
 }
 
 export interface AdImage {
@@ -78,6 +87,50 @@ export interface SocietyListItem {
   description?: string;
   createdAt: string;
   memberCount: number;
+}
+
+export interface SocietyMemberItem {
+  societyId: number;
+  userId: number;
+  roleId: number;
+  joinedAt: string;
+  roleName?: string;
+  user?: {
+    id: number;
+    fullName: string;
+    email?: string;
+    phone?: string;
+  };
+}
+
+export type MembershipRequestStatus = "Pending" | "Approved" | "Rejected";
+
+export interface SocietyMembershipRequest {
+  societyId: number;
+  userId: number;
+  message?: string;
+  status: MembershipRequestStatus;
+  createdAt: string;
+  processedAt?: string;
+  user?: {
+    id: number;
+    fullName: string;
+    email?: string;
+  };
+}
+
+export interface SocietyPost {
+  societyPostId: number;
+  societyId: number;
+  authorUserId: number;
+  title?: string;
+  content?: string;
+  imageUrl?: string;
+  createdAt: string;
+  author?: {
+    id: number;
+    fullName: string;
+  };
 }
 
 export interface NewsFeedItem {

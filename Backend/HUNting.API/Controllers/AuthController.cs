@@ -1,10 +1,12 @@
-using System.Linq;
 using System.Security.Claims;
+using HUNting.API.Data;
+using HUNting.API.Models.Societies;
 using HUNting.API.Models.Users;
 using HUNting.API.Services.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace HUNting.API.Controllers
 {
@@ -15,15 +17,18 @@ namespace HUNting.API.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly ITokenService _tokenService;
+        private readonly HuntingContext _ctx;
 
         public AuthController(
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
-            ITokenService tokenService)
+            ITokenService tokenService,
+            HuntingContext ctx)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _tokenService = tokenService;
+            _ctx = ctx;
         }
 
         [HttpPost("register")]
@@ -37,7 +42,8 @@ namespace HUNting.API.Controllers
                 Phone = request.Phone,
                 PhoneNumber = request.Phone,
                 PhoneNumberConfirmed = !string.IsNullOrWhiteSpace(request.Phone),
-                UserName = request.Email
+                UserName = request.Email,
+                AccountType = request.AccountType
             };
 
             var createResult = await _userManager.CreateAsync(user, request.Password);
@@ -46,12 +52,50 @@ namespace HUNting.API.Controllers
                 return BadRequest(new { message = "A regisztráció sikertelen. Ellenőrizd a megadott adatokat." });
             }
 
-            await _userManager.AddToRoleAsync(user, "Hunter");
+            var defaultRole = request.AccountType == AccountType.Society ? "SocietyManager" : "Hunter";
+            await _userManager.AddToRoleAsync(user, defaultRole);
+
+            Society? ownedSociety = null;
+            if (request.AccountType == AccountType.Society)
+            {
+                if (request.Society == null || string.IsNullOrWhiteSpace(request.Society.Name))
+                {
+                    return BadRequest(new { message = "A társaság neve kötelező." });
+                }
+
+                ownedSociety = new Society
+                {
+                    Name = request.Society.Name,
+                    Email = request.Society.Email ?? request.Email,
+                    Phone = request.Society.Phone ?? request.Phone,
+                    Description = request.Society.Description,
+                    OwnerUserId = user.Id,
+                    PasswordHash = Guid.NewGuid().ToString("N")
+                };
+
+                _ctx.Societies.Add(ownedSociety);
+                await _ctx.SaveChangesAsync();
+
+                var leaderRole = await _ctx.SocietyRoles.FirstOrDefaultAsync(r => r.Name == "Vezeto");
+                if (leaderRole != null)
+                {
+                    _ctx.SocietyMembers.Add(new SocietyMember
+                    {
+                        SocietyId = ownedSociety.SocietyId,
+                        UserId = user.Id,
+                        RoleId = leaderRole.RoleId,
+                        JoinedAt = DateTime.UtcNow
+                    });
+                    await _ctx.SaveChangesAsync();
+                }
+            }
 
             var roles = await _userManager.GetRolesAsync(user);
             var token = _tokenService.CreateToken(user, roles);
 
-            return Ok(new AuthResponse(token.AccessToken, token.ExpiresAt, UserDto.From(user, roles)));
+            ownedSociety ??= await _ctx.Societies.AsNoTracking().FirstOrDefaultAsync(s => s.OwnerUserId == user.Id);
+
+            return Ok(new AuthResponse(token.AccessToken, token.ExpiresAt, UserDto.From(user, roles, ownedSociety)));
         }
 
         [HttpPost("login")]
@@ -72,15 +116,15 @@ namespace HUNting.API.Controllers
 
             var roles = await _userManager.GetRolesAsync(user);
             var token = _tokenService.CreateToken(user, roles);
+            var ownedSociety = await _ctx.Societies.AsNoTracking().FirstOrDefaultAsync(s => s.OwnerUserId == user.Id);
 
-            return Ok(new AuthResponse(token.AccessToken, token.ExpiresAt, UserDto.From(user, roles)));
+            return Ok(new AuthResponse(token.AccessToken, token.ExpiresAt, UserDto.From(user, roles, ownedSociety)));
         }
 
         [HttpPost("logout")]
         [Authorize]
         public IActionResult Logout()
         {
-            // For JWT logout happens client side. Endpoint exists for symmetry.
             return NoContent();
         }
 
@@ -95,19 +139,31 @@ namespace HUNting.API.Controllers
             if (user == null) return Unauthorized();
 
             var roles = await _userManager.GetRolesAsync(user);
-            return Ok(UserDto.From(user, roles));
+            var ownedSociety = await _ctx.Societies.AsNoTracking().FirstOrDefaultAsync(s => s.OwnerUserId == user.Id);
+            return Ok(UserDto.From(user, roles, ownedSociety));
         }
     }
 
-    public record RegisterRequest(string FullName, string Email, string Password, string? Phone);
+    public record RegisterRequest(string FullName, string Email, string Password, string? Phone, AccountType AccountType = AccountType.Person, SocietyRegistrationRequest? Society = null);
+
+    public record SocietyRegistrationRequest(string Name, string? Email, string? Phone, string? Description);
 
     public record LoginRequest(string Email, string Password);
 
     public record AuthResponse(string AccessToken, DateTime ExpiresAt, UserDto User);
 
-    public record UserDto(int Id, string Name, string Email, string? Phone, IEnumerable<string> Roles)
+    public record SocietySummaryDto(int SocietyId, string Name);
+
+    public record UserDto(int Id, string Name, string Email, string? Phone, IEnumerable<string> Roles, AccountType AccountType, SocietySummaryDto? OwnedSociety)
     {
-        public static UserDto From(ApplicationUser user, IEnumerable<string> roles) =>
-            new(user.Id, user.FullName, user.Email ?? string.Empty, user.Phone, roles);
+        public static UserDto From(ApplicationUser user, IEnumerable<string> roles, Society? ownedSociety = null) =>
+            new(
+                user.Id,
+                user.FullName,
+                user.Email ?? string.Empty,
+                user.Phone,
+                roles,
+                user.AccountType,
+                ownedSociety is null ? null : new SocietySummaryDto(ownedSociety.SocietyId, ownedSociety.Name));
     }
 }

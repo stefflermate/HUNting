@@ -21,7 +21,11 @@ export function getStoredUser(): StoredUser | null {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as StoredUser;
+    const parsed = JSON.parse(raw) as Partial<StoredUser>;
+    if (!parsed.accountType) {
+      parsed.accountType = "Person";
+    }
+    return parsed as StoredUser;
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
-import type { AuthUser } from "@/types";
+import type { AccountType, AuthUser } from "@/types";
 import {
   getAccessToken,
   getStoredUser,
@@ -20,6 +20,13 @@ type RegisterPayload = {
   email: string;
   password: string;
   phone?: string;
+  accountType: AccountType;
+  society?: {
+    name: string;
+    email?: string;
+    phone?: string;
+    description?: string;
+  };
 };
 
 interface AuthContextValue {

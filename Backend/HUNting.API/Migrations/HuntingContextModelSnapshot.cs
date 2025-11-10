@@ -537,6 +537,9 @@ namespace HUNting.API.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -550,6 +553,10 @@ namespace HUNting.API.Migrations
 
                     b.HasIndex("Email")
                         .IsUnique();
+
+                    b.HasIndex("OwnerUserId")
+                        .IsUnique()
+                        .HasFilter("[OwnerUserId] IS NOT NULL");
 
                     b.ToTable("Societies");
                 });
@@ -577,6 +584,77 @@ namespace HUNting.API.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("SocietyMembers");
+                });
+
+            modelBuilder.Entity("HUNting.API.Models.Societies.SocietyMembershipRequest", b =>
+                {
+                    b.Property<int>("SocietyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ProcessedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("SocietyId", "UserId");
+
+                    b.HasIndex("ProcessedByUserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("SocietyMembershipRequests");
+                });
+
+            modelBuilder.Entity("HUNting.API.Models.Societies.SocietyPost", b =>
+                {
+                    b.Property<int>("SocietyPostId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("PostId");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SocietyPostId"));
+
+                    b.Property<int>("AuthorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Content")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int>("SocietyId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("SocietyPostId");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("SocietyId");
+
+                    b.ToTable("SocietyPosts");
                 });
 
             modelBuilder.Entity("HUNting.API.Models.Societies.SocietyRole", b =>
@@ -609,6 +687,9 @@ namespace HUNting.API.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<int>("AccessFailedCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("AccountType")
                         .HasColumnType("int");
 
                     b.Property<string>("ConcurrencyStamp")
@@ -1008,6 +1089,16 @@ namespace HUNting.API.Migrations
                     b.Navigation("Visibility");
                 });
 
+            modelBuilder.Entity("HUNting.API.Models.Societies.Society", b =>
+                {
+                    b.HasOne("HUNting.API.Models.Users.ApplicationUser", "Owner")
+                        .WithOne("OwnedSociety")
+                        .HasForeignKey("HUNting.API.Models.Societies.Society", "OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Owner");
+                });
+
             modelBuilder.Entity("HUNting.API.Models.Societies.SocietyMember", b =>
                 {
                     b.HasOne("HUNting.API.Models.Societies.SocietyRole", "Role")
@@ -1033,6 +1124,51 @@ namespace HUNting.API.Migrations
                     b.Navigation("Society");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("HUNting.API.Models.Societies.SocietyMembershipRequest", b =>
+                {
+                    b.HasOne("HUNting.API.Models.Users.ApplicationUser", "ProcessedBy")
+                        .WithMany("ProcessedMembershipRequests")
+                        .HasForeignKey("ProcessedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("HUNting.API.Models.Societies.Society", "Society")
+                        .WithMany("MembershipRequests")
+                        .HasForeignKey("SocietyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("HUNting.API.Models.Users.ApplicationUser", "User")
+                        .WithMany("MembershipRequests")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProcessedBy");
+
+                    b.Navigation("Society");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("HUNting.API.Models.Societies.SocietyPost", b =>
+                {
+                    b.HasOne("HUNting.API.Models.Users.ApplicationUser", "Author")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("HUNting.API.Models.Societies.Society", "Society")
+                        .WithMany("Posts")
+                        .HasForeignKey("SocietyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Author");
+
+                    b.Navigation("Society");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<int>", b =>
@@ -1120,7 +1256,11 @@ namespace HUNting.API.Migrations
                 {
                     b.Navigation("Members");
 
+                    b.Navigation("MembershipRequests");
+
                     b.Navigation("News");
+
+                    b.Navigation("Posts");
                 });
 
             modelBuilder.Entity("HUNting.API.Models.Societies.SocietyRole", b =>
@@ -1131,6 +1271,12 @@ namespace HUNting.API.Migrations
             modelBuilder.Entity("HUNting.API.Models.Users.ApplicationUser", b =>
                 {
                     b.Navigation("HuntingLogs");
+
+                    b.Navigation("MembershipRequests");
+
+                    b.Navigation("OwnedSociety");
+
+                    b.Navigation("ProcessedMembershipRequests");
 
                     b.Navigation("Societies");
                 });

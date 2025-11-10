@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using HUNting.API.Data;
 using HUNting.API.Models.Hunting;
+using HUNting.API.Models.Users;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -26,25 +27,47 @@ namespace HUNting.API.Controllers
         }
 
         [HttpGet]
+        [Authorize]
         public async Task<ActionResult<IEnumerable<HuntingLog>>> GetAll()
         {
-            var logs = await _ctx.HuntingLogs
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            IQueryable<HuntingLog> query = _ctx.HuntingLogs
                 .AsNoTracking()
                 .Include(h => h.User)
                 .OrderByDescending(h => h.OccurredAt)
-                .ThenByDescending(h => h.CreatedAt)
-                .ToListAsync();
+                .ThenByDescending(h => h.CreatedAt);
 
+            var scope = Request.Query["scope"].ToString();
+            var canSeeAll = User.IsInRole("Administrator") && scope.Equals("all", StringComparison.OrdinalIgnoreCase);
+            if (!canSeeAll)
+            {
+                query = query.Where(h => h.UserId == userId.Value);
+            }
+
+            var logs = await query.ToListAsync();
             return Ok(logs);
         }
 
         [HttpGet("{id:int}")]
+        [Authorize]
         public async Task<ActionResult<HuntingLog>> Get(int id)
         {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
             var log = await _ctx.HuntingLogs
                 .Include(h => h.User)
                 .FirstOrDefaultAsync(h => h.HuntingLogId == id);
-            return log is null ? NotFound() : Ok(log);
+            if (log == null) return NotFound();
+
+            if (log.UserId != userId && !User.IsInRole("Administrator"))
+            {
+                return Forbid();
+            }
+
+            return Ok(log);
         }
 
         [HttpPost]
@@ -54,6 +77,10 @@ namespace HUNting.API.Controllers
         {
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
+            if (IsSocietyAccount())
+            {
+                return BadRequest("Tarsasagi fiok nem hozhat letre naplobejegyzest.");
+            }
 
             var log = new HuntingLog
             {
@@ -209,6 +236,12 @@ namespace HUNting.API.Controllers
             public string? Notes { get; set; }
             public bool ShareWithSociety { get; set; }
             public IFormFile? Image { get; set; }
+        }
+
+        private bool IsSocietyAccount()
+        {
+            var accountType = User.FindFirstValue("account_type");
+            return Enum.TryParse<AccountType>(accountType, true, out var parsed) && parsed == AccountType.Society;
         }
     }
 }

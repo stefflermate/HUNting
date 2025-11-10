@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { huntingLogsApi } from "@/services/huntingLogsApi";
 import { resolveAssetUrl } from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
@@ -16,14 +16,26 @@ function toLocalInputValue(date: Date) {
 }
 
 export function HuntingLogsPage() {
+  const { isAuthenticated, user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data, isFetching } = useQuery({
     queryKey: ["huntingLogs"],
     queryFn: () => huntingLogsApi.list(),
+    enabled: isAuthenticated && user?.accountType === "Person",
   });
 
-  const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  if (!isAuthenticated) {
+    return <Navigate to="/auth/login" replace />;
+  }
+
+  if (user?.accountType !== "Person") {
+    return (
+      <div className="rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-8 text-amber-100">
+        A naplo funkcio csak szemely fiokkal erheto el.
+      </div>
+    );
+  }
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [occurredAt, setOccurredAt] = useState(() => toLocalInputValue(new Date()));
