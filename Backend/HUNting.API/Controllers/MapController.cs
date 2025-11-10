@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Security.Claims;
 using HUNting.API.Models.Map;
 using HUNting.API.Services;
@@ -41,10 +42,31 @@ namespace HUNting.API.Controllers
         }
 
         [HttpGet("markers")]
-        public async Task<ActionResult<IEnumerable<MapMarkerResponse>>> GetMarkers(CancellationToken cancellationToken)
+        public async Task<ActionResult<IEnumerable<MapMarkerResponse>>> GetMarkers([FromQuery] MapLayerQuery query, CancellationToken cancellationToken)
         {
-            var markers = await _service.GetMarkersAsync(cancellationToken);
-            return Ok(markers.Select(MapMarkerResponse.FromEntity));
+            var userId = GetUserId();
+            var scope = MapLayerScope.From(query.Scope);
+
+            if (scope == MapLayerScope.Personal)
+            {
+                if (userId == null) return Unauthorized();
+                var items = await _service.GetMarkersAsync(userId.Value, null, cancellationToken);
+                return Ok(items.Select(MapMarkerResponse.FromEntity));
+            }
+
+            if (scope == MapLayerScope.Society)
+            {
+                if (userId == null) return Unauthorized();
+                if (query.SocietyId == null) return BadRequest("societyId is required.");
+
+                var canAccess = await _service.UserBelongsToSocietyAsync(query.SocietyId.Value, userId.Value, cancellationToken);
+                if (!canAccess) return Forbid();
+
+                var items = await _service.GetMarkersAsync(null, query.SocietyId, cancellationToken);
+                return Ok(items.Select(MapMarkerResponse.FromEntity));
+            }
+
+            return Ok(Enumerable.Empty<MapMarkerResponse>());
         }
 
         [HttpPost("markers")]
@@ -53,6 +75,12 @@ namespace HUNting.API.Controllers
         {
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
+
+            if (request.SocietyId.HasValue)
+            {
+                var allowed = await _service.UserBelongsToSocietyAsync(request.SocietyId.Value, userId.Value, cancellationToken);
+                if (!allowed) return Forbid();
+            }
 
             var entity = new MapMarker
             {
@@ -76,6 +104,12 @@ namespace HUNting.API.Controllers
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
+            if (request.SocietyId.HasValue)
+            {
+                var allowed = await _service.UserBelongsToSocietyAsync(request.SocietyId.Value, userId.Value, cancellationToken);
+                if (!allowed) return Forbid();
+            }
+
             var entity = new MapMarker
             {
                 MarkerId = markerId,
@@ -88,7 +122,16 @@ namespace HUNting.API.Controllers
                 SocietyId = request.SocietyId
             };
 
-            var updated = await _service.UpdateMarkerAsync(entity, cancellationToken);
+            MapMarker? updated;
+            try
+            {
+                updated = await _service.UpdateMarkerAsync(entity, userId.Value, cancellationToken);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+
             return updated == null ? NotFound() : Ok(MapMarkerResponse.FromEntity(updated));
         }
 
@@ -96,15 +139,46 @@ namespace HUNting.API.Controllers
         [Authorize]
         public async Task<IActionResult> DeleteMarker(int markerId, CancellationToken cancellationToken)
         {
-            await _service.DeleteMarkerAsync(markerId, cancellationToken);
-            return NoContent();
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            try
+            {
+                await _service.DeleteMarkerAsync(markerId, userId.Value, cancellationToken);
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
         }
 
         [HttpGet("polygons")]
-        public async Task<ActionResult<IEnumerable<MapPolygonResponse>>> GetPolygons(CancellationToken cancellationToken)
+        public async Task<ActionResult<IEnumerable<MapPolygonResponse>>> GetPolygons([FromQuery] MapLayerQuery query, CancellationToken cancellationToken)
         {
-            var polygons = await _service.GetPolygonsAsync(cancellationToken);
-            return Ok(polygons.Select(MapPolygonResponse.FromEntity));
+            var userId = GetUserId();
+            var scope = MapLayerScope.From(query.Scope);
+
+            if (scope == MapLayerScope.Personal)
+            {
+                if (userId == null) return Unauthorized();
+                var items = await _service.GetPolygonsAsync(userId.Value, null, cancellationToken);
+                return Ok(items.Select(MapPolygonResponse.FromEntity));
+            }
+
+            if (scope == MapLayerScope.Society)
+            {
+                if (userId == null) return Unauthorized();
+                if (query.SocietyId == null) return BadRequest("societyId is required.");
+
+                var allowed = await _service.UserBelongsToSocietyAsync(query.SocietyId.Value, userId.Value, cancellationToken);
+                if (!allowed) return Forbid();
+
+                var items = await _service.GetPolygonsAsync(null, query.SocietyId, cancellationToken);
+                return Ok(items.Select(MapPolygonResponse.FromEntity));
+            }
+
+            return Ok(Enumerable.Empty<MapPolygonResponse>());
         }
 
         [HttpPost("polygons")]
@@ -113,6 +187,12 @@ namespace HUNting.API.Controllers
         {
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
+
+            if (request.SocietyId.HasValue)
+            {
+                var allowed = await _service.UserBelongsToSocietyAsync(request.SocietyId.Value, userId.Value, cancellationToken);
+                if (!allowed) return Forbid();
+            }
 
             var polygon = new MapPolygon
             {
@@ -143,6 +223,12 @@ namespace HUNting.API.Controllers
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
+            if (request.SocietyId.HasValue)
+            {
+                var allowed = await _service.UserBelongsToSocietyAsync(request.SocietyId.Value, userId.Value, cancellationToken);
+                if (!allowed) return Forbid();
+            }
+
             var polygon = new MapPolygon
             {
                 PolygonId = polygonId,
@@ -162,7 +248,16 @@ namespace HUNting.API.Controllers
                     .ToList()
             };
 
-            var updated = await _service.UpdatePolygonAsync(polygon, cancellationToken);
+            MapPolygon? updated;
+            try
+            {
+                updated = await _service.UpdatePolygonAsync(polygon, userId.Value, cancellationToken);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+
             return updated == null ? NotFound() : Ok(MapPolygonResponse.FromEntity(updated));
         }
 
@@ -170,80 +265,18 @@ namespace HUNting.API.Controllers
         [Authorize]
         public async Task<IActionResult> DeletePolygon(int polygonId, CancellationToken cancellationToken)
         {
-            await _service.DeletePolygonAsync(polygonId, cancellationToken);
-            return NoContent();
-        }
-
-        [HttpGet("paths")]
-        public async Task<ActionResult<IEnumerable<MapPathResponse>>> GetPaths(CancellationToken cancellationToken)
-        {
-            var paths = await _service.GetPathsAsync(cancellationToken);
-            return Ok(paths.Select(MapPathResponse.FromEntity));
-        }
-
-        [HttpPost("paths")]
-        [Authorize]
-        public async Task<ActionResult<MapPathResponse>> CreatePath([FromBody] MapPathRequest request, CancellationToken cancellationToken)
-        {
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
-            var path = new MapPath
+            try
             {
-                CreatedByUserId = userId.Value,
-                Name = request.Name,
-                VisibilityCode = request.VisibilityCode ?? "PUBLIC",
-                StrokeColor = request.StrokeColor,
-                SocietyId = request.SocietyId,
-                Points = request.Points
-                    .Select((p, index) => new MapPathPoint
-                    {
-                        Seq = index,
-                        Latitude = p.Latitude,
-                        Longitude = p.Longitude
-                    })
-                    .ToList()
-            };
-
-            var created = await _service.CreatePathAsync(path, cancellationToken);
-            return CreatedAtAction(nameof(GetPaths), MapPathResponse.FromEntity(created));
-        }
-
-        [HttpPut("paths/{pathId:int}")]
-        [Authorize]
-        public async Task<ActionResult<MapPathResponse>> UpdatePath(int pathId, [FromBody] MapPathRequest request, CancellationToken cancellationToken)
-        {
-            var userId = GetUserId();
-            if (userId == null) return Unauthorized();
-
-            var path = new MapPath
+                await _service.DeletePolygonAsync(polygonId, userId.Value, cancellationToken);
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException)
             {
-                PathId = pathId,
-                CreatedByUserId = userId.Value,
-                Name = request.Name,
-                VisibilityCode = request.VisibilityCode ?? "PUBLIC",
-                StrokeColor = request.StrokeColor,
-                SocietyId = request.SocietyId,
-                Points = request.Points
-                    .Select((p, index) => new MapPathPoint
-                    {
-                        Seq = index,
-                        Latitude = p.Latitude,
-                        Longitude = p.Longitude
-                    })
-                    .ToList()
-            };
-
-            var updated = await _service.UpdatePathAsync(path, cancellationToken);
-            return updated == null ? NotFound() : Ok(MapPathResponse.FromEntity(updated));
-        }
-
-        [HttpDelete("paths/{pathId:int}")]
-        [Authorize]
-        public async Task<IActionResult> DeletePath(int pathId, CancellationToken cancellationToken)
-        {
-            await _service.DeletePathAsync(pathId, cancellationToken);
-            return NoContent();
+                return Forbid();
+            }
         }
 
         private int? GetUserId()
@@ -251,6 +284,8 @@ namespace HUNting.API.Controllers
             var id = User.FindFirstValue(ClaimTypes.NameIdentifier);
             return int.TryParse(id, out var value) ? value : (int?)null;
         }
+
+        public record MapLayerQuery(string? Scope, int? SocietyId);
 
         public record MapMarkerRequest(int IconTypeId, decimal Latitude, decimal Longitude, string? Note, string? VisibilityCode, int? SocietyId);
 
@@ -277,28 +312,25 @@ namespace HUNting.API.Controllers
                     polygon.Points.OrderBy(p => p.Seq).Select(MapPointResponse.FromEntity));
         }
 
-        public record MapPathRequest(string? Name, string? VisibilityCode, string? StrokeColor, int? SocietyId, IList<MapPointRequest> Points);
-
-        public record MapPathResponse(int PathId, string? Name, string VisibilityCode, string? StrokeColor, int? SocietyId, IEnumerable<MapPointResponse> Points)
-        {
-            public static MapPathResponse FromEntity(MapPath path) =>
-                new(
-                    path.PathId,
-                    path.Name,
-                    path.VisibilityCode,
-                    path.StrokeColor,
-                    path.SocietyId,
-                    path.Points.OrderBy(p => p.Seq).Select(MapPointResponse.FromEntity));
-        }
-
         public record MapPointResponse(int Seq, decimal Latitude, decimal Longitude)
         {
             public static MapPointResponse FromEntity(MapPolygonPoint point) =>
                 new(point.Seq, point.Latitude, point.Longitude);
-
-            public static MapPointResponse FromEntity(MapPathPoint point) =>
-                new(point.Seq, point.Latitude, point.Longitude);
         }
     }
-}
 
+    public readonly record struct MapLayerScope(string Value)
+    {
+        public static MapLayerScope None => new("none");
+        public static MapLayerScope Personal => new("personal");
+        public static MapLayerScope Society => new("society");
+
+        public static MapLayerScope From(string? raw) =>
+            raw?.ToLowerInvariant() switch
+            {
+                "personal" => Personal,
+                "society" => Society,
+                _ => None
+            };
+    }
+}

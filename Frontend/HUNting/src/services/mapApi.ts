@@ -2,7 +2,6 @@ import { apiClient } from "@/lib/apiClient";
 import type {
   MapIconTypeItem,
   MapMarkerItem,
-  MapPathItem,
   MapPoint,
   MapPolygonItem,
   MapVisibilityOption,
@@ -26,26 +25,32 @@ type MapPolygonPayload = {
   points: MapPoint[];
 };
 
-type MapPathPayload = {
-  name?: string;
-  visibilityCode?: string;
-  strokeColor?: string;
-  societyId?: number;
-  points: MapPoint[];
-};
-
 type MapConfigResponse = {
   iconTypes: MapIconTypeItem[];
   visibilities: MapVisibilityOption[];
 };
+
+export type MapLayerParams =
+  | { scope: "personal" }
+  | { scope: "society"; societyId: number };
+
+function buildLayerQuery(params: MapLayerParams) {
+  const search = new URLSearchParams();
+  search.set("scope", params.scope);
+  if (params.scope === "society") {
+    search.set("societyId", String(params.societyId));
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
 
 async function getConfig(): Promise<MapConfigResponse> {
   const { data } = await apiClient.get<MapConfigResponse>("/map/config");
   return data;
 }
 
-async function listMarkers(): Promise<MapMarkerItem[]> {
-  const { data } = await apiClient.get<MapMarkerItem[]>("/map/markers");
+async function listMarkers(params: MapLayerParams): Promise<MapMarkerItem[]> {
+  const { data } = await apiClient.get<MapMarkerItem[]>(`/map/markers${buildLayerQuery(params)}`);
   return data;
 }
 
@@ -63,8 +68,8 @@ async function deleteMarker(markerId: number): Promise<void> {
   await apiClient.delete(`/map/markers/${markerId}`);
 }
 
-async function listPolygons(): Promise<MapPolygonItem[]> {
-  const { data } = await apiClient.get<MapPolygonItem[]>("/map/polygons");
+async function listPolygons(params: MapLayerParams): Promise<MapPolygonItem[]> {
+  const { data } = await apiClient.get<MapPolygonItem[]>(`/map/polygons${buildLayerQuery(params)}`);
   return data;
 }
 
@@ -82,25 +87,6 @@ async function deletePolygon(polygonId: number): Promise<void> {
   await apiClient.delete(`/map/polygons/${polygonId}`);
 }
 
-async function listPaths(): Promise<MapPathItem[]> {
-  const { data } = await apiClient.get<MapPathItem[]>("/map/paths");
-  return data;
-}
-
-async function createPath(payload: MapPathPayload): Promise<MapPathItem> {
-  const { data } = await apiClient.post<MapPathItem>("/map/paths", payload);
-  return data;
-}
-
-async function updatePath(pathId: number, payload: MapPathPayload): Promise<MapPathItem> {
-  const { data } = await apiClient.put<MapPathItem>(`/map/paths/${pathId}`, payload);
-  return data;
-}
-
-async function deletePath(pathId: number): Promise<void> {
-  await apiClient.delete(`/map/paths/${pathId}`);
-}
-
 export const mapApi = {
   getConfig,
   listMarkers,
@@ -111,9 +97,4 @@ export const mapApi = {
   createPolygon,
   updatePolygon,
   deletePolygon,
-  listPaths,
-  createPath,
-  updatePath,
-  deletePath,
 };
-

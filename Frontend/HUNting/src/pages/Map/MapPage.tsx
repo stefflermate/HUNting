@@ -4,18 +4,18 @@ import {
   GoogleMap,
   MarkerF,
   PolygonF,
-  PolylineF,
   InfoWindow,
   useLoadScript,
   DrawingManager,
 } from "@react-google-maps/api";
 import { mapApi } from "@/services/mapApi";
+import { societiesApi } from "@/services/societiesApi";
 import type { MapPoint } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Loader2, MapPin, PencilRuler, Shapes, Trash2 } from "lucide-react";
+import { Loader2, MapPin, Shapes, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
-type DraftMode = "view" | "marker" | "polygon" | "path";
+type DraftMode = "view" | "marker" | "polygon";
 
 type MarkerDraft = {
   latitude: number;
@@ -33,12 +33,25 @@ type PolygonDraft = {
   fillColor: string;
 };
 
-type PathDraft = {
-  points: MapPoint[];
-  name: string;
-  visibilityCode: string;
-  strokeColor: string;
+type MapLayerSelection =
+  | { scope: "none" }
+  | { scope: "personal" }
+  | { scope: "society"; societyId: number };
+
+type LayerEntry = {
+  key: string;
+  label: string;
+  description: string;
+  selection: MapLayerSelection;
 };
+
+function isSameSelection(a: MapLayerSelection, b: MapLayerSelection) {
+  if (a.scope !== b.scope) return false;
+  if (a.scope === "society" && b.scope === "society") {
+    return a.societyId === b.societyId;
+  }
+  return true;
+}
 
 const DEFAULT_CENTER = { lat: 47.1625, lng: 19.5033 };
 const DEFAULT_ZOOM = 7;
@@ -63,13 +76,6 @@ const defaultPolygonDraft = (): PolygonDraft => ({
   fillColor: "#22c55e55",
 });
 
-const defaultPathDraft = (): PathDraft => ({
-  points: [],
-  name: "",
-  visibilityCode: "PUBLIC",
-  strokeColor: "#3b82f6",
-});
-
 export function MapPage() {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const { isAuthenticated } = useAuth();
@@ -78,15 +84,11 @@ export function MapPage() {
   const [mode, setMode] = useState<DraftMode>("view");
   const [markerDraft, setMarkerDraft] = useState<MarkerDraft | null>(null);
   const [polygonDraft, setPolygonDraft] = useState<PolygonDraft | null>(null);
-  const [pathDraft, setPathDraft] = useState<PathDraft | null>(null);
+  const [layerSelection, setLayerSelection] = useState<MapLayerSelection>({ scope: "none" });
   const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<number | null>(null);
   const [selectedPolygon, setSelectedPolygon] = useState<{
     polygonId: number;
-    position: google.maps.LatLngLiteral;
-  } | null>(null);
-  const [selectedPath, setSelectedPath] = useState<{
-    pathId: number;
     position: google.maps.LatLngLiteral;
   } | null>(null);
 
@@ -103,23 +105,90 @@ export function MapPage() {
     enabled: Boolean(apiKey),
   });
 
-  const { data: markers } = useQuery({
-    queryKey: ["map", "markers"],
-    queryFn: mapApi.listMarkers,
-    enabled: Boolean(apiKey),
+  const layerParams = useMemo(() => {
+    if (layerSelection.scope === "personal") {
+      return { scope: "personal" } as const;
+    }
+    if (layerSelection.scope === "society") {
+      return { scope: "society", societyId: layerSelection.societyId } as const;
+    }
+    return null;
+  }, [layerSelection]);
+
+  const markersQuery = useQuery({
+    queryKey: [
+      "map",
+      "markers",
+      layerParams?.scope ?? "none",
+      layerParams && layerParams.scope === "society" ? layerParams.societyId : null,
+    ],
+    queryFn: () => mapApi.listMarkers(layerParams!),
+    enabled: Boolean(apiKey) && Boolean(layerParams),
   });
 
-  const { data: polygons } = useQuery({
-    queryKey: ["map", "polygons"],
-    queryFn: mapApi.listPolygons,
-    enabled: Boolean(apiKey),
+  const polygonsQuery = useQuery({
+    queryKey: [
+      "map",
+      "polygons",
+      layerParams?.scope ?? "none",
+      layerParams && layerParams.scope === "society" ? layerParams.societyId : null,
+    ],
+    queryFn: () => mapApi.listPolygons(layerParams!),
+    enabled: Boolean(apiKey) && Boolean(layerParams),
   });
 
-  const { data: paths } = useQuery({
-    queryKey: ["map", "paths"],
-    queryFn: mapApi.listPaths,
-    enabled: Boolean(apiKey),
+  const { data: mySocieties } = useQuery({
+    queryKey: ["societies", "mine"],
+    queryFn: societiesApi.my,
+    enabled: isAuthenticated,
   });
+
+  const markers = markersQuery.data ?? [];
+  const polygons = polygonsQuery.data ?? [];
+
+  const layerEntries = useMemo<LayerEntry[]>(() => {
+    const entries: LayerEntry[] = [
+      {
+        key: "personal",
+        label: "Saját jelölések",
+        description: "Csak általad mentett pontok és területek.",
+        selection: { scope: "personal" },
+      },
+    ];
+    (mySocieties ?? []).forEach((society) => {
+      entries.push({
+        key: `society-${society.societyId}`,
+        label: society.name,
+        description: "A társaságod közös rétege.",
+        selection: { scope: "society", societyId: society.societyId },
+      });
+    });
+    return entries;
+  }, [mySocieties]);
+
+  const activeLayerLabel = useMemo(() => {
+    if (layerSelection.scope === "personal") {
+      return "Saját jelölések";
+    }
+    if (layerSelection.scope === "society") {
+      const society = mySocieties?.find((s) => s.societyId === layerSelection.societyId);
+      return society ? `Társaság: ${society.name}` : "Társasági réteg";
+    }
+    return "Nincs kiválasztva";
+  }, [layerSelection, mySocieties]);
+
+  const handleLayerSelect = useCallback(
+    (selection: MapLayerSelection) => {
+      if (isSameSelection(selection, layerSelection)) return;
+      setLayerSelection(selection);
+      setMode("view");
+      setMarkerDraft(null);
+      setPolygonDraft(null);
+      setSelectedMarkerId(null);
+      setSelectedPolygon(null);
+    },
+    [layerSelection]
+  );
 
   const markerMutation = useMutation({
     mutationFn: (payload: Parameters<typeof mapApi.createMarker>[0]) => mapApi.createMarker(payload),
@@ -139,16 +208,6 @@ export function MapPage() {
   const polygonDeleteMutation = useMutation({
     mutationFn: mapApi.deletePolygon,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["map", "polygons"] }),
-  });
-
-  const pathMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof mapApi.createPath>[0]) => mapApi.createPath(payload),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["map", "paths"] }),
-  });
-
-  const pathDeleteMutation = useMutation({
-    mutationFn: mapApi.deletePath,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["map", "paths"] }),
   });
 
   const iconTypes = config?.iconTypes ?? [];
@@ -200,43 +259,16 @@ export function MapPage() {
     return { normalizedPolygons: result, invalidPolygonCount: invalid };
   }, [polygons]);
 
-  const {
-    normalizedPaths,
-    invalidPathCount,
-  } = useMemo(() => {
-    let invalid = 0;
-    const result = (paths ?? [])
-      .map((path) => ({
-        ...path,
-        points: path.points
-          .map((p) => ({
-            ...p,
-            latitude: toNumber(p.latitude),
-            longitude: toNumber(p.longitude),
-          }))
-          .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
-          .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)),
-      }))
-      .filter((path) => {
-        const isValid = path.points.length >= 2;
-        if (!isValid) invalid += 1;
-        return isValid;
-      });
-    return { normalizedPaths: result, invalidPathCount: invalid };
-  }, [paths]);
-
   useEffect(() => {
-    if (invalidMarkerCount || invalidPolygonCount || invalidPathCount) {
+    if (invalidMarkerCount || invalidPolygonCount) {
       console.warn("[MapPage] Invalid map geometries filtered out", {
         invalidMarkerCount,
         invalidPolygonCount,
-        invalidPathCount,
         rawMarkers: markers,
         rawPolygons: polygons,
-        rawPaths: paths,
       });
     }
-  }, [invalidMarkerCount, invalidPolygonCount, invalidPathCount, markers, polygons, paths]);
+  }, [invalidMarkerCount, invalidPolygonCount, markers, polygons]);
 
   const focusOnPosition = useCallback(
     (position: google.maps.LatLngLiteral, zoom = 13) => {
@@ -272,10 +304,6 @@ export function MapPage() {
     normalizedPolygons.forEach((polygon) =>
       polygon.points.forEach((point) => bounds.extend({ lat: point.latitude, lng: point.longitude }))
     );
-    normalizedPaths.forEach((path) =>
-      path.points.forEach((point) => bounds.extend({ lat: point.latitude, lng: point.longitude }))
-    );
-
     if (!bounds.isEmpty()) {
       mapInstance.fitBounds(bounds);
       const listener = google.maps.event.addListenerOnce(mapInstance, "idle", () => {
@@ -286,11 +314,12 @@ export function MapPage() {
       });
       return () => google.maps.event.removeListener(listener);
     }
-  }, [mapInstance, normalizedMarkers, normalizedPolygons, normalizedPaths]);
+  }, [mapInstance, normalizedMarkers, normalizedPolygons]);
 
   const handleMapClick = useCallback(
     (event: google.maps.MapMouseEvent) => {
       if (mode !== "marker") return;
+      if (!layerParams) return;
       if (!event.latLng) return;
 
       setMarkerDraft({
@@ -301,7 +330,7 @@ export function MapPage() {
         visibilityCode: "PUBLIC",
       });
     },
-    [iconTypes, mode]
+    [iconTypes, mode, layerParams]
   );
 
   const handleMarkerDraftSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -315,6 +344,7 @@ export function MapPage() {
       longitude: markerDraft.longitude,
       note: markerDraft.note || undefined,
       visibilityCode: markerDraft.visibilityCode,
+      societyId: layerParams?.scope === "society" ? layerParams.societyId : undefined,
     });
 
     setMarkerDraft(null);
@@ -347,40 +377,10 @@ export function MapPage() {
       visibilityCode: polygonDraft.visibilityCode,
       strokeColor: polygonDraft.strokeColor,
       fillColor: polygonDraft.fillColor,
+      societyId: layerParams?.scope === "society" ? layerParams.societyId : undefined,
       points: polygonDraft.points,
     });
     setPolygonDraft(null);
-    setMode("view");
-  };
-
-  const handlePathComplete = useCallback((polyline: google.maps.Polyline) => {
-    const path = polyline.getPath();
-    const points: MapPoint[] = [];
-    for (let i = 0; i < path.getLength(); i += 1) {
-      const latLng = path.getAt(i);
-      points.push({ latitude: latLng.lat(), longitude: latLng.lng() });
-    }
-    polyline.setMap(null);
-    if (points.length > 1) {
-      setPathDraft({
-        ...defaultPathDraft(),
-        points,
-      });
-    }
-  }, []);
-
-  const handlePathSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!pathDraft) return;
-    if (pathDraft.points.length < 2) return;
-
-    await pathMutation.mutateAsync({
-      name: pathDraft.name || undefined,
-      visibilityCode: pathDraft.visibilityCode,
-      strokeColor: pathDraft.strokeColor,
-      points: pathDraft.points,
-    });
-    setPathDraft(null);
     setMode("view");
   };
 
@@ -394,25 +394,15 @@ export function MapPage() {
       editable: false,
     };
 
-    const pathOptions: google.maps.PolylineOptions = {
-      strokeColor: pathDraft?.strokeColor ?? "#3b82f6",
-      strokeWeight: 3,
-      clickable: false,
-      editable: false,
-    };
-
     return {
       drawingMode:
         mode === "polygon"
           ? google.maps.drawing.OverlayType.POLYGON
-          : mode === "path"
-          ? google.maps.drawing.OverlayType.POLYLINE
           : null,
       polygonOptions,
-      polylineOptions: pathOptions,
       drawingControl: false,
     };
-  }, [mode, pathDraft?.strokeColor, polygonDraft?.fillColor, polygonDraft?.strokeColor]);
+  }, [mode, polygonDraft?.fillColor, polygonDraft?.strokeColor]);
 
   const infoWindowData = useMemo(() => {
     if (selectedMarkerId !== null) {
@@ -455,36 +445,110 @@ export function MapPage() {
       };
     }
 
-    if (selectedPath) {
-      const path = normalizedPaths.find((p) => p.pathId === selectedPath.pathId);
-      if (!path) return null;
-      return {
-        position: selectedPath.position,
-        content: (
-          <div className="min-w-44 space-y-1 text-sm text-slate-800">
-            <p className="font-semibold">{path.name || "Megnevezetlen útvonal"}</p>
-            <p className="text-xs text-slate-600">{path.visibilityCode}</p>
-            <p className="text-xs">Pontok száma: {path.points.length}</p>
-            {path.strokeColor && (
-              <p className="text-xs">
-                Szín: <span style={{ color: path.strokeColor }}>{path.strokeColor}</span>
-              </p>
-            )}
-          </div>
-        ),
-      };
-    }
-
     return null;
   }, [
     iconTypes,
     normalizedMarkers,
-    normalizedPaths,
     normalizedPolygons,
     selectedMarkerId,
-    selectedPath,
     selectedPolygon,
   ]);
+
+  const MarkerList = () => (
+    <div className="space-y-2">
+      <header className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-amber-200/70">Jelölések</h3>
+        <span className="text-xs text-amber-200/60">{normalizedMarkers.length} db</span>
+      </header>
+      <div className="space-y-2">
+        {normalizedMarkers.map((marker) => (
+          <article
+            key={marker.markerId}
+            className="flex cursor-pointer items-start justify-between rounded-xl border border-amber-200/10 bg-[#0f160f] p-3 text-sm text-amber-200/80 transition hover:border-amber-400/40 hover:bg-[#172017]"
+            onClick={() => {
+              setSelectedMarkerId(marker.markerId);
+              setSelectedPolygon(null);
+              focusOnPosition({ lat: marker.latitude, lng: marker.longitude }, 14);
+            }}
+          >
+            <div>
+              <p className="font-semibold text-amber-100">
+                {iconTypes.find((i) => i.iconTypeId === marker.iconTypeId)?.name ?? "Pont"}{" "}
+                <span className="ml-2 text-xs text-amber-300/70">{marker.visibilityCode}</span>
+              </p>
+              <p className="text-xs">
+                {marker.latitude.toFixed(5)}, {marker.longitude.toFixed(5)}
+              </p>
+              {marker.note && <p className="mt-1 text-xs">{marker.note}</p>}
+            </div>
+            {isAuthenticated && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-red-300 hover:text-red-200"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  markerDeleteMutation.mutate(marker.markerId);
+                }}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
+          </article>
+        ))}
+        {!normalizedMarkers.length && (
+          <p className="text-xs text-amber-200/60">Ehhez a réteghez még nincs rögzített pont.</p>
+        )}
+      </div>
+    </div>
+  );
+
+  const PolygonList = () => (
+    <div className="space-y-2">
+      <header className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-amber-200/70">Területek</h3>
+        <span className="text-xs text-amber-200/60">{normalizedPolygons.length} db</span>
+      </header>
+      <div className="space-y-2">
+        {normalizedPolygons.map((polygon) => (
+          <article
+            key={polygon.polygonId}
+            className="flex cursor-pointer items-start justify-between rounded-xl border border-amber-200/10 bg-[#0f160f] p-3 text-sm text-amber-200/80 transition hover:border-amber-400/40 hover:bg-[#172017]"
+            onClick={() => {
+              focusOnBounds(polygon.points);
+              setSelectedPolygon({
+                polygonId: polygon.polygonId,
+                position: centroidFromPoints(polygon.points),
+              });
+              setSelectedMarkerId(null);
+            }}
+          >
+            <div>
+              <p className="font-semibold text-amber-100">{polygon.name || "Megnevezetlen terület"}</p>
+              <p className="text-xs text-amber-300/70">{polygon.visibilityCode}</p>
+              <p className="text-xs">Pontok: {polygon.points.length}</p>
+            </div>
+            {isAuthenticated && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-red-300 hover:text-red-200"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  polygonDeleteMutation.mutate(polygon.polygonId);
+                }}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
+          </article>
+        ))}
+        {!normalizedPolygons.length && (
+          <p className="text-xs text-amber-200/60">Ehhez a réteghez még nincs rögzített terület.</p>
+        )}
+      </div>
+    </div>
+  );
 
   if (!apiKey) {
     return (
@@ -507,7 +571,14 @@ export function MapPage() {
     );
   }
 
-  const actionDisabled = !isAuthenticated;
+  const hasLayerSelected = Boolean(layerParams);
+  const actionDisabled = !isAuthenticated || !hasLayerSelected;
+  const layerSelectValue =
+    layerSelection.scope === "none"
+      ? ""
+      : layerSelection.scope === "personal"
+      ? "personal"
+      : `society-${layerSelection.societyId}`;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
@@ -532,11 +603,7 @@ export function MapPage() {
             }}
           >
             {mode !== "view" && isAuthenticated && (
-              <DrawingManager
-                options={drawingOptions}
-                onPolygonComplete={handlePolygonComplete}
-                onPolylineComplete={handlePathComplete}
-              />
+              <DrawingManager options={drawingOptions} onPolygonComplete={handlePolygonComplete} />
             )}
 
             {normalizedMarkers.map((marker) => (
@@ -546,7 +613,6 @@ export function MapPage() {
                 onClick={() => {
                   setSelectedMarkerId(marker.markerId);
                   setSelectedPolygon(null);
-                  setSelectedPath(null);
                   focusOnPosition({ lat: marker.latitude, lng: marker.longitude }, 14);
                 }}
                 icon={
@@ -571,7 +637,6 @@ export function MapPage() {
                     ? { lat: event.latLng.lat(), lng: event.latLng.lng() }
                     : centroidFromPoints(polygon.points);
                   setSelectedPolygon({ polygonId: polygon.polygonId, position });
-                  setSelectedPath(null);
                   setSelectedMarkerId(null);
                 }}
                 options={{
@@ -583,40 +648,26 @@ export function MapPage() {
                 }}
               />
             ))}
-            {normalizedPaths.map((path) => (
-              <PolylineF
-                key={path.pathId}
-                path={path.points.map((p) => ({ lat: p.latitude, lng: p.longitude }))}
-                onClick={(event) => {
-                  const position = event.latLng
-                    ? { lat: event.latLng.lat(), lng: event.latLng.lng() }
-                    : centroidFromPoints(path.points);
-                  setSelectedPath({ pathId: path.pathId, position });
-                  setSelectedPolygon(null);
-                  setSelectedMarkerId(null);
-                }}
-                options={{
-                  strokeColor: path.strokeColor ?? "#f59e0b",
-                  strokeOpacity: 1,
-                  strokeWeight: 4,
-                  geodesic: true,
-                }}
-              />
-            ))}
-
             {infoWindowData && (
               <InfoWindow
                 position={infoWindowData.position}
                 onCloseClick={() => {
                   setSelectedMarkerId(null);
                   setSelectedPolygon(null);
-                  setSelectedPath(null);
                 }}
               >
                 {infoWindowData.content}
               </InfoWindow>
             )}
           </GoogleMap>
+        )}
+        {!hasLayerSelected && isLoaded && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 px-6 text-center text-amber-100">
+            <p className="text-lg font-display">Válassz megjelenítendő réteget</p>
+            <p className="mt-2 text-sm text-amber-200/80">
+              A jobb oldali listából választhatod ki, hogy a saját vagy valamelyik társaság elemeit szeretnéd megjeleníteni.
+            </p>
+          </div>
         )}
       </div>
 
@@ -631,22 +682,51 @@ export function MapPage() {
           )}
         </div>
 
-        {(invalidMarkerCount || invalidPolygonCount || invalidPathCount) && (
+        <div className="space-y-2">
+          <label className="text-sm text-amber-200/80" htmlFor="layer-select">
+            Aktív réteg kiválasztása
+          </label>
+          <select
+            id="layer-select"
+            value={layerSelectValue}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === "") {
+                handleLayerSelect({ scope: "none" });
+              } else if (value === "personal") {
+                handleLayerSelect({ scope: "personal" });
+              } else if (value.startsWith("society-")) {
+                const [, id] = value.split("-");
+                handleLayerSelect({ scope: "society", societyId: Number(id) });
+              }
+            }}
+            className="w-full rounded-xl border border-amber-200/20 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none"
+          >
+            <option value="">-- Nincs kiválasztva --</option>
+            <option value="personal">Saját jelöléseim</option>
+            {(mySocieties ?? []).map((society) => (
+              <option key={society.societyId} value={`society-${society.societyId}`}>
+                {society.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-amber-200/70">Aktív: {activeLayerLabel}</p>
+        </div>
+
+        {(invalidMarkerCount || invalidPolygonCount) && (
           <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
             <p className="font-semibold text-amber-200">Figyelem</p>
             <p>
               {invalidMarkerCount ? `${invalidMarkerCount} pont` : ""}
-              {invalidMarkerCount && (invalidPolygonCount || invalidPathCount) ? ", " : ""}
+              {invalidMarkerCount && invalidPolygonCount ? ", " : ""}
               {invalidPolygonCount ? `${invalidPolygonCount} terület` : ""}
-              {invalidPolygonCount && invalidPathCount ? ", " : ""}
-              {invalidPathCount ? `${invalidPathCount} útvonal` : ""}
               {" "}érvénytelen koordinátákat tartalmazott, ezért nem jelent meg a térképen.
             </p>
           </div>
         )}
 
         <div className="space-y-3">
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             <Button
               variant={mode === "marker" ? "default" : "outline"}
               disabled={actionDisabled}
@@ -666,17 +746,6 @@ export function MapPage() {
               <Shapes className="mr-2 size-4" />
               Terület
             </Button>
-            <Button
-              variant={mode === "path" ? "default" : "outline"}
-              disabled={actionDisabled}
-              onClick={() => {
-                setPathDraft(defaultPathDraft());
-                setMode((m) => (m === "path" ? "view" : "path"));
-              }}
-            >
-              <PencilRuler className="mr-2 size-4" />
-              Útvonal
-            </Button>
           </div>
           {mode === "marker" && (
             <p className="text-xs text-amber-200/70">Kattints a térképre a pont elhelyezéséhez, majd töltsd ki az adatokat.</p>
@@ -686,137 +755,53 @@ export function MapPage() {
               Rajzold meg a terület körvonalát a térképen. Dupla kattintással zárhatod a poligont.
             </p>
           )}
-          {mode === "path" && (
-            <p className="text-xs text-amber-200/70">
-              Rajzold meg a szabadkézi vonalat. Dupla kattintással fejezheted be.
-            </p>
-          )}
         </div>
 
-        <section className="space-y-3">
-          <header className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-amber-200/70">Jelölések</h3>
-            <span className="text-xs text-amber-200/60">{markers?.length ?? 0} db</span>
-          </header>
-          <div className="space-y-2">
-            {normalizedMarkers.map((marker) => (
-              <article
-                key={marker.markerId}
-                className="flex cursor-pointer items-start justify-between rounded-xl border border-amber-200/10 bg-[#0f160f] p-3 text-sm text-amber-200/80 transition hover:border-amber-400/40 hover:bg-[#172017]"
-                onClick={() => {
-                  setSelectedMarkerId(marker.markerId);
-                  setSelectedPolygon(null);
-                  setSelectedPath(null);
-                  focusOnPosition({ lat: marker.latitude, lng: marker.longitude }, 14);
-                }}
+        <div className="space-y-4">
+          {layerEntries.map((entry) => {
+            const isActive = isSameSelection(entry.selection, layerSelection);
+            return (
+              <div
+                key={entry.key}
+                className={`rounded-2xl border border-amber-200/10 bg-[#0f160f] p-4 transition ${
+                  isActive ? "border-amber-400/40" : ""
+                }`}
               >
-                <div>
-                  <p className="font-semibold text-amber-100">
-                    {iconTypes.find((i) => i.iconTypeId === marker.iconTypeId)?.name ?? "Pont"}{" "}
-                    <span className="ml-2 text-xs text-amber-300/70">{marker.visibilityCode}</span>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-amber-100">{entry.label}</p>
+                    <p className="text-xs text-amber-200/70">{entry.description}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    {isActive && (
+                      <span className="rounded-full border border-emerald-400/40 px-3 py-1 text-xs text-emerald-200">
+                        Aktív
+                      </span>
+                    )}
+                    <Button
+                      variant={isActive ? "default" : "outline"}
+                      onClick={() => handleLayerSelect(entry.selection)}
+                      className="text-xs uppercase tracking-[0.3em]"
+                    >
+                      {isActive ? "Frissítés" : "Megnyitás"}
+                    </Button>
+                  </div>
+                </div>
+                {isActive ? (
+                  <div className="mt-4 space-y-6">
+                    <MarkerList />
+                    <PolygonList />
+                  </div>
+                ) : (
+                  <p className="mt-4 text-xs text-amber-200/60">
+                    A „Megnyitás” gombbal töltheted be ezt a réteget a térképen.
                   </p>
-                  <p className="text-xs">
-                    {marker.latitude.toFixed(5)}, {marker.longitude.toFixed(5)}
-                  </p>
-                  {marker.note && <p className="mt-1 text-xs">{marker.note}</p>}
-                </div>
-                {isAuthenticated && (
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    className="text-red-300 hover:text-red-200"
-                    onClick={() => markerDeleteMutation.mutate(marker.markerId)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
                 )}
-              </article>
-            ))}
-            {!normalizedMarkers.length && <p className="text-xs text-amber-200/60">Nincs rögzített pont.</p>}
-          </div>
-        </section>
+              </div>
+            );
+          })}
+        </div>
 
-        <section className="space-y-3">
-          <header className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-amber-200/70">Területek</h3>
-            <span className="text-xs text-amber-200/60">{normalizedPolygons.length} db</span>
-          </header>
-          <div className="space-y-2">
-            {normalizedPolygons.map((polygon) => (
-              <article
-                key={polygon.polygonId}
-                className="flex cursor-pointer items-start justify-between rounded-xl border border-amber-200/10 bg-[#0f160f] p-3 text-sm text-amber-200/80 transition hover:border-amber-400/40 hover:bg-[#172017]"
-                onClick={() => {
-                  focusOnBounds(polygon.points);
-                  setSelectedPolygon({
-                    polygonId: polygon.polygonId,
-                    position: centroidFromPoints(polygon.points),
-                  });
-                  setSelectedMarkerId(null);
-                  setSelectedPath(null);
-                }}
-              >
-                <div>
-                  <p className="font-semibold text-amber-100">{polygon.name || "Megnevezetlen terület"}</p>
-                  <p className="text-xs text-amber-300/70">{polygon.visibilityCode}</p>
-                  <p className="text-xs">Pontok: {polygon.points.length}</p>
-                </div>
-                {isAuthenticated && (
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    className="text-red-300 hover:text-red-200"
-                    onClick={() => polygonDeleteMutation.mutate(polygon.polygonId)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                )}
-              </article>
-            ))}
-            {!normalizedPolygons.length && <p className="text-xs text-amber-200/60">Nincs rögzített terület.</p>}
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <header className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-amber-200/70">Útvonalak</h3>
-            <span className="text-xs text-amber-200/60">{normalizedPaths.length} db</span>
-          </header>
-          <div className="space-y-2">
-            {normalizedPaths.map((path) => (
-              <article
-                key={path.pathId}
-                className="flex cursor-pointer items-start justify-between rounded-xl border border-amber-200/10 bg-[#0f160f] p-3 text-sm text-amber-200/80 transition hover:border-amber-400/40 hover:bg-[#172017]"
-                onClick={() => {
-                  focusOnBounds(path.points);
-                  setSelectedPath({
-                    pathId: path.pathId,
-                    position: centroidFromPoints(path.points),
-                  });
-                  setSelectedMarkerId(null);
-                  setSelectedPolygon(null);
-                }}
-              >
-                <div>
-                  <p className="font-semibold text-amber-100">{path.name || "Megnevezetlen útvonal"}</p>
-                  <p className="text-xs text-amber-300/70">{path.visibilityCode}</p>
-                  <p className="text-xs">Pontok: {path.points.length}</p>
-                </div>
-                {isAuthenticated && (
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    className="text-red-300 hover:text-red-200"
-                    onClick={() => pathDeleteMutation.mutate(path.pathId)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                )}
-              </article>
-            ))}
-            {!normalizedPaths.length && <p className="text-xs text-amber-200/60">Nincs rögzített útvonal.</p>}
-          </div>
-        </section>
       </aside>
 
       {/* Marker draft form */}
@@ -963,62 +948,6 @@ export function MapPage() {
         </form>
       )}
 
-      {pathDraft && mode === "path" && (
-        <form
-          onSubmit={handlePathSubmit}
-          className="fixed bottom-6 left-6 z-20 w-full max-w-sm space-y-4 rounded-3xl border border-amber-200/20 bg-[#121b12]/95 p-6 shadow-2xl shadow-black/40 backdrop-blur"
-        >
-          <h3 className="font-display text-xl text-amber-100">Útvonal mentése</h3>
-          <p className="text-xs text-amber-200/70">Pontok száma: {pathDraft.points.length}</p>
-
-          <div className="space-y-2">
-            <label className="text-sm text-amber-200/80">Név</label>
-            <input
-              className="w-full rounded-lg border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none"
-              value={pathDraft.name}
-              onChange={(event) => setPathDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm text-amber-200/80">Láthatóság</label>
-            <select
-              className="w-full rounded-lg border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none"
-              value={pathDraft.visibilityCode}
-              onChange={(event) =>
-                setPathDraft((prev) => (prev ? { ...prev, visibilityCode: event.target.value } : prev))
-              }
-            >
-              {visibilities.map((visibility) => (
-                <option key={visibility.visibilityCode} value={visibility.visibilityCode}>
-                  {visibility.description ?? visibility.visibilityCode}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm text-amber-200/80">Vonal színe</label>
-            <input
-              type="color"
-              className="flex h-10 w-full items-center justify-center rounded-lg border border-amber-400/30 bg-black/30"
-              value={pathDraft.strokeColor}
-              onChange={(event) =>
-                setPathDraft((prev) => (prev ? { ...prev, strokeColor: event.target.value } : prev))
-              }
-            />
-          </div>
-
-          <div className="flex justify-end gap-3">
-            <Button type="button" variant="ghost" onClick={() => setPathDraft(null)}>
-              Mégse
-            </Button>
-            <Button type="submit" disabled={pathMutation.isPending}>
-              {pathMutation.isPending ? "Mentés..." : "Útvonal mentése"}
-            </Button>
-          </div>
-        </form>
-      )}
     </div>
   );
 }
