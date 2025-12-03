@@ -21,6 +21,15 @@ export interface AuthUser {
   ownedSociety?: OwnedSocietySummary | null;
 }
 
+export interface AdminUserItem {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  roles: string[];
+  createdAt: string;
+}
+
 export interface AdImage {
   imageId: number;
   imageUrl: string;

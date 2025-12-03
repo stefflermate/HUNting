@@ -17,6 +17,8 @@ namespace HUNting.API.Data
     public static class SeedData
     {
         private const string DefaultPassword = "Hunter123!";
+        private const string AdminEmail = "admin@gmail.com";
+        private const string AdminPassword = "adminadmin";
 
         public static async Task SeedAsync(IServiceProvider services)
         {
@@ -171,7 +173,8 @@ namespace HUNting.API.Data
         {
             var seedUsers = new[]
             {
-                new SeedUser("Kovacs Bence",  "bence.kovacs@example.hu",  "+36 30 111 1111", new[] { "Hunter", "Administrator" }),
+                new SeedUser("Admin",         AdminEmail,                 "+36 30 000 0000", new[] { "Administrator" }, AdminPassword),
+                new SeedUser("Kovacs Bence",  "bence.kovacs@example.hu",  "+36 30 111 1111", new[] { "Hunter" }),
                 new SeedUser("Nagy Zsofia",   "zsofia.nagy@example.hu",   "+36 30 222 2222", new[] { "Hunter" }),
                 new SeedUser("Toth Andras",   "andras.toth@example.hu",   "+36 30 333 3333", new[] { "Hunter" }),
                 new SeedUser("Szabo Katalin", "katalin.szabo@example.hu", "+36 30 444 4444", new[] { "Hunter" }),
@@ -201,7 +204,8 @@ namespace HUNting.API.Data
                         PhoneNumberConfirmed = true
                     };
 
-                    var createResult = await userManager.CreateAsync(user, DefaultPassword);
+                    var password = seedUser.Password ?? DefaultPassword;
+                    var createResult = await userManager.CreateAsync(user, password);
                     if (!createResult.Succeeded)
                     {
                         var message = string.Join(", ", createResult.Errors.Select(e => e.Description));
@@ -471,7 +475,7 @@ namespace HUNting.API.Data
             }
         }
 
-        private record SeedUser(string FullName, string Email, string Phone, string[] Roles);
+        private record SeedUser(string FullName, string Email, string Phone, string[] Roles, string? Password = null);
 
         private record SeedAd(
             string Title,
