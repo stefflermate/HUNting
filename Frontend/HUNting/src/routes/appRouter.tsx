@@ -18,6 +18,7 @@ import { RegisterPage } from "@/pages/Auth/RegisterPage";
 import { ProfilePage } from "@/pages/Profile/ProfilePage";
 import { AdminDashboardPage } from "@/pages/Admin/AdminDashboardPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import { WeatherPage } from "@/pages/Weather/WeatherPage";
 
 export const appRouter = createBrowserRouter([
   {
@@ -37,6 +38,7 @@ export const appRouter = createBrowserRouter([
       { path: "map", element: <MapPage /> },
       { path: "news", element: <NewsPage /> },
       { path: "logs", element: <HuntingLogsPage /> },
+      { path: "weather", element: <WeatherPage /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "admin", element: <AdminDashboardPage /> },
     ],
