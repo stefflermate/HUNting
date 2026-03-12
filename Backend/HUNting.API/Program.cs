@@ -75,6 +75,9 @@ builder.Services.AddScoped<ISocietyService, SocietyService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IMapService, MapService>();
 
+// OpenAI Service regisztrálása
+builder.Services.AddHttpClient<IOpenAiService, OpenAiService>();
+
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {

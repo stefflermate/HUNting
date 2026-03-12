@@ -198,6 +198,7 @@ namespace HUNting.API.Controllers
             {
                 CreatedByUserId = userId.Value,
                 Name = request.Name,
+                Description = request.Description,
                 VisibilityCode = request.VisibilityCode ?? "PUBLIC",
                 StrokeColor = request.StrokeColor,
                 FillColor = request.FillColor,
@@ -234,6 +235,7 @@ namespace HUNting.API.Controllers
                 PolygonId = polygonId,
                 CreatedByUserId = userId.Value,
                 Name = request.Name,
+                Description = request.Description,
                 VisibilityCode = request.VisibilityCode ?? "PUBLIC",
                 StrokeColor = request.StrokeColor,
                 FillColor = request.FillColor,
@@ -297,14 +299,15 @@ namespace HUNting.API.Controllers
 
         public record MapPointRequest(decimal Latitude, decimal Longitude);
 
-        public record MapPolygonRequest(string? Name, string? VisibilityCode, string? StrokeColor, string? FillColor, int? SocietyId, IList<MapPointRequest> Points);
+        public record MapPolygonRequest(string? Name, string? Description, string? VisibilityCode, string? StrokeColor, string? FillColor, int? SocietyId, IList<MapPointRequest> Points);
 
-        public record MapPolygonResponse(int PolygonId, string? Name, string VisibilityCode, string? StrokeColor, string? FillColor, int? SocietyId, IEnumerable<MapPointResponse> Points)
+        public record MapPolygonResponse(int PolygonId, string? Name, string? Description, string VisibilityCode, string? StrokeColor, string? FillColor, int? SocietyId, IEnumerable<MapPointResponse> Points)
         {
             public static MapPolygonResponse FromEntity(MapPolygon polygon) =>
                 new(
                     polygon.PolygonId,
                     polygon.Name,
+                    polygon.Description,
                     polygon.VisibilityCode,
                     polygon.StrokeColor,
                     polygon.FillColor,

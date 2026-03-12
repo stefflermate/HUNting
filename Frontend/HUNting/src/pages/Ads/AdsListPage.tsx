@@ -8,20 +8,12 @@ import { useAuth } from "@/context/AuthContext";
 import type {
   AdCategoryItem,
   AdListItem,
-  AdStatusItem,
   PaginatedResult,
 } from "@/types";
 
 const PAGE_SIZE = 9;
 
-const fallbackStatuses: AdStatusItem[] = [
-  { statusCode: "ACTIVE", description: "Aktiv" },
-  { statusCode: "PENDING", description: "Ellenorzes alatt" },
-  { statusCode: "SOLD", description: "Lezarva" },
-];
-
 export function AdsListPage() {
-  const [status, setStatus] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState<number | undefined>();
   const [minPrice, setMinPrice] = useState("");
@@ -34,19 +26,13 @@ export function AdsListPage() {
     queryFn: adsApi.categories,
   });
 
-  const { data: statusesResponse } = useQuery<AdStatusItem[]>({
-    queryKey: ["ad-statuses"],
-    queryFn: adsApi.statuses,
-  });
-
   useEffect(() => {
     setPage(1);
-  }, [status, categoryId, search, minPrice, maxPrice]);
+  }, [categoryId, search, minPrice, maxPrice]);
 
   const { data, isFetching } = useQuery<PaginatedResult<AdListItem>>({
     queryKey: [
       "ads",
-      status,
       categoryId,
       search,
       minPrice,
@@ -55,7 +41,6 @@ export function AdsListPage() {
     ],
     queryFn: () =>
       adsApi.list({
-        statusCode: status,
         categoryId,
         search: search.trim() || undefined,
         minPrice: minPrice ? Number(minPrice) : undefined,
@@ -70,13 +55,7 @@ export function AdsListPage() {
     return Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   }, [data]);
 
-  const statusOptions =
-    statusesResponse && statusesResponse.length > 0
-      ? statusesResponse
-      : fallbackStatuses;
-
   const clearFilters = () => {
-    setStatus(undefined);
     setSearch("");
     setCategoryId(undefined);
     setMinPrice("");
@@ -86,111 +65,107 @@ export function AdsListPage() {
   return (
     <div className="space-y-8">
       <header className="rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-8 shadow-lg backdrop-blur">
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div>
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div className="lg:w-1/3">
             <p className="text-sm uppercase tracking-[0.3em] text-amber-300/80">
               Hirdetes piacter
             </p>
-            <h1 className="font-display text-4xl text-amber-100">Hirdetesek</h1>
-            <p className="mt-3 max-w-2xl text-amber-200/80">
-              Keresd meg a hozzad illo felszerelest vagy vendegvadasz meghivast, es szurj kategoria, statusz vagy ar alapjan.
+            <h1 className="font-display text-4xl text-amber-100 flex items-center justify-between">
+              <span>Hirdetesek</span>
+            </h1>
+            <p className="mt-3 text-amber-200/80">
+              Keresd meg a hozzad illo felszerelest vagy vendegvadasz meghivast.
             </p>
+            {isAuthenticated && (
+              <div className="mt-6">
+                <Button
+                  asChild
+                  className="bg-amber-400 text-black hover:bg-amber-300 w-full sm:w-auto"
+                >
+                  <Link to="/ads/new">Uj hirdetes</Link>
+                </Button>
+              </div>
+            )}
           </div>
-          <div className="flex w-full flex-col gap-3 md:w-auto">
+          
+          <div className="lg:w-2/3">
             <form
-              className="flex w-full flex-col gap-3 md:flex-row md:items-end"
+              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4"
               onSubmit={(event) => event.preventDefault()}
             >
-              <div className="flex items-center gap-2 rounded-xl border border-amber-400/30 bg-black/30 px-4 py-2 text-amber-100 focus-within:border-amber-300 focus-within:ring-2 focus-within:ring-amber-300/40">
-                <Search className="size-4 text-amber-300" />
+              <div className="sm:col-span-2 md:col-span-3 flex items-center gap-2 rounded-xl border border-amber-400/30 bg-black/30 px-4 py-3 text-amber-100 focus-within:border-amber-300 focus-within:ring-2 focus-within:ring-amber-300/40">
+                <Search className="size-5 text-amber-300 flex-shrink-0" />
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Keress cim vagy leiras alapjan"
-                  className="w-full bg-transparent text-sm text-amber-100 outline-none placeholder:text-amber-200/60"
+                  placeholder="Keress cim vagy leiras alapjan..."
+                  className="w-full bg-transparent text-base text-amber-100 outline-none placeholder:text-amber-200/60"
                 />
               </div>
-              <select
-                className="rounded-xl border border-amber-400/30 bg-black/30 px-4 py-2 text-sm text-amber-100 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
-                value={categoryId ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setCategoryId(value ? Number(value) : undefined);
-                }}
-              >
-                <option value="">Osszes kategoria</option>
-                {categories?.map((category) => (
-                  <option key={category.categoryId} value={category.categoryId}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="Minimum ar"
-                  value={minPrice}
-                  onChange={(event) => setMinPrice(event.target.value)}
-                  className="w-28 rounded-xl border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="Maximum ar"
-                  value={maxPrice}
-                  onChange={(event) => setMaxPrice(event.target.value)}
-                  className="w-28 rounded-xl border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
-                />
+              
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs uppercase tracking-wider text-amber-300/60 font-semibold px-1">Kategoria</label>
+                <select
+                  className="w-full min-h-[44px] rounded-xl border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40 appearance-none cursor-pointer"
+                  value={categoryId ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setCategoryId(value ? Number(value) : undefined);
+                  }}
+                >
+                  <option value="">Mindegyik kategoria</option>
+                  {categories?.map((category) => (
+                    <option key={category.categoryId} value={category.categoryId}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                className="border border-transparent text-amber-200 hover:border-amber-400/40 hover:bg-amber-400/10"
-                onClick={clearFilters}
-              >
-                Szurok torlese
-              </Button>
+              
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs uppercase tracking-wider text-amber-300/60 font-semibold px-1">Minimum ar</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Mettol"
+                    value={minPrice}
+                    onChange={(event) => setMinPrice(event.target.value)}
+                    className="w-full min-h-[44px] rounded-xl border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-amber-200/50 pointer-events-none">HUF</span>
+                </div>
+              </div>
+              
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs uppercase tracking-wider text-amber-300/60 font-semibold px-1">Maximum ar</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Meddig"
+                    value={maxPrice}
+                    onChange={(event) => setMaxPrice(event.target.value)}
+                    className="w-full min-h-[44px] rounded-xl border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-amber-200/50 pointer-events-none">HUF</span>
+                </div>
+              </div>
+
+              <div className="sm:col-span-2 md:col-span-3 flex justify-end mt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-amber-200 hover:text-amber-100 hover:bg-amber-400/10"
+                  onClick={clearFilters}
+                >
+                  Mezok torlese
+                </Button>
+              </div>
             </form>
-            {isAuthenticated && (
-              <Button
-                asChild
-                className="bg-amber-400 text-black hover:bg-amber-300"
-              >
-                <Link to="/ads/new">Uj hirdetes</Link>
-              </Button>
-            )}
           </div>
         </div>
       </header>
-
-      <div className="flex flex-wrap gap-3">
-        <Button
-          variant={!status ? "default" : "outline"}
-          className={
-            !status
-              ? "bg-amber-400 text-black hover:bg-amber-300"
-              : "border-amber-400/30 text-amber-200 hover:bg-amber-400/10"
-          }
-          onClick={() => setStatus(undefined)}
-        >
-          Minden statusz
-        </Button>
-        {statusOptions.map((option) => (
-          <Button
-            key={option.statusCode}
-            variant={option.statusCode === status ? "default" : "outline"}
-            className={
-              option.statusCode === status
-                ? "bg-amber-400 text-black hover:bg-amber-300"
-                : "border-amber-400/30 text-amber-200 hover:bg-amber-400/10"
-            }
-            onClick={() => setStatus(option.statusCode)}
-          >
-            {option.description ?? option.statusCode}
-          </Button>
-        ))}
-      </div>
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {isFetching

@@ -16,7 +16,6 @@ export function AppHeader() {
       { label: "Hirdetesek", to: "/ads" },
       { label: "Tarsasagok", to: "/societies" },
       { label: "Terkep", to: "/map" },
-      { label: "Hirek", to: "/news" },
       { label: "Idojaras", to: "/weather" },
     ];
 

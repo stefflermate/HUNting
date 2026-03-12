@@ -18,6 +18,7 @@ type MapMarkerPayload = {
 
 type MapPolygonPayload = {
   name?: string;
+  description?: string;
   visibilityCode?: string;
   strokeColor?: string;
   fillColor?: string;

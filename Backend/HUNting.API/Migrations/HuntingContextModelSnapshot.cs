@@ -374,6 +374,10 @@ namespace HUNting.API.Migrations
                     b.Property<int>("CreatedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("FillColor")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");

@@ -10,7 +10,6 @@ import { SocietiesPage } from "@/pages/Societies/SocietiesPage";
 import { SocietyDetailPage } from "@/pages/Societies/SocietyDetailPage";
 import { MySocietiesPage } from "@/pages/Societies/MySocietiesPage";
 import { SocietyManagementPage } from "@/pages/Societies/SocietyManagementPage";
-import { NewsPage } from "@/pages/News/NewsPage";
 import { HuntingLogsPage } from "@/pages/HuntingLogs/HuntingLogsPage";
 import { MapPage } from "@/pages/Map/MapPage";
 import { LoginPage } from "@/pages/Auth/LoginPage";
@@ -36,7 +35,6 @@ export const appRouter = createBrowserRouter([
       { path: "societies/manage", element: <SocietyManagementPage /> },
       { path: "societies/:societyId", element: <SocietyDetailPage /> },
       { path: "map", element: <MapPage /> },
-      { path: "news", element: <NewsPage /> },
       { path: "logs", element: <HuntingLogsPage /> },
       { path: "weather", element: <WeatherPage /> },
       { path: "profile", element: <ProfilePage /> },
