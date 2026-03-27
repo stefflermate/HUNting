@@ -44,9 +44,8 @@ export function HuntingLogsPage() {
   const [notes, setNotes] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [shotFired, setShotFired] = useState(false);
-  const [shareWithSociety, setShareWithSociety] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -78,8 +77,6 @@ export function HuntingLogsPage() {
       setAnimalType("");
       setNotes("");
       handleFileSelection(null);
-      setShotFired(false);
-      setShareWithSociety(false);
     },
   });
 
@@ -129,8 +126,8 @@ export function HuntingLogsPage() {
       locationText: locationText.trim() || undefined,
       animalType: animalType.trim() || undefined,
       notes: notes.trim() || undefined,
-      shotFired,
-      shareWithSociety,
+      shotFired: false,
+      shareWithSociety: false,
       imageFile: imageFile ?? undefined,
     };
 
@@ -286,27 +283,6 @@ export function HuntingLogsPage() {
               />
             </div>
 
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <label className="flex items-center gap-2 text-sm text-amber-200/80">
-                <input
-                  type="checkbox"
-                  checked={shotFired}
-                  onChange={(event) => setShotFired(event.target.checked)}
-                  className="size-4 rounded border border-amber-400/40 bg-black/30"
-                />
-                Lovessel zartad le
-              </label>
-              <label className="flex items-center gap-2 text-sm text-amber-200/80">
-                <input
-                  type="checkbox"
-                  checked={shareWithSociety}
-                  onChange={(event) => setShareWithSociety(event.target.checked)}
-                  className="size-4 rounded border border-amber-400/40 bg-black/30"
-                />
-                Megosztas a tarsasaggal
-              </label>
-            </div>
-
             {(error || mutation.isError) && (
               <p className="rounded-xl border border-red-400/30 bg-red-900/30 px-4 py-3 text-sm text-red-100">
                 {error ??
@@ -349,10 +325,13 @@ export function HuntingLogsPage() {
                 <div className="mt-3 h-3 w-full rounded bg-amber-200/10" />
               </div>
             ))
-          : data?.map((log) => (
+          : data?.map((log) => {
+              const isExpanded = expandedLogId === log.huntingLogId;
+              return (
               <article
                 key={log.huntingLogId}
-                className="rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-6 shadow-inner shadow-black/20 transition hover:border-amber-400/50 hover:bg-[#182616]"
+                className="rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-6 shadow-inner shadow-black/20 transition hover:border-amber-400/50 hover:bg-[#182616] cursor-pointer"
+                onClick={() => setExpandedLogId(isExpanded ? null : log.huntingLogId)}
               >
                 <header className="flex flex-wrap items-center justify-between gap-4">
                   <div>
@@ -363,27 +342,32 @@ export function HuntingLogsPage() {
                       {log.locationText ?? "Ismeretlen helyszin"}
                     </h2>
                   </div>
-                  <span className="rounded-full border border-amber-400/40 px-3 py-1 text-xs uppercase tracking-[0.2em] text-amber-200/70">
-                    {log.shareWithSociety ? "Megosztva" : "Privat"}
-                  </span>
+                  <div className="flex items-center gap-4">
+                    <span className="text-amber-400/80 text-sm">
+                      {isExpanded ? "Osszecsukas" : "Reszletek"}
+                    </span>
+                  </div>
                 </header>
-                <div className="mt-4 space-y-3 text-sm text-amber-200/80">
-                  {log.animalType && (
-                    <p className="font-semibold text-amber-200">
-                      Vad: {log.animalType}
-                    </p>
-                  )}
-                  {log.notes && <p>{log.notes}</p>}
-                  {log.imageUrl && (
-                    <img
-                      src={resolveAssetUrl(log.imageUrl)}
-                      alt="Hunting log"
-                      className="rounded-2xl border border-amber-200/10"
-                    />
-                  )}
-                </div>
+                {isExpanded && (
+                  <div className="mt-4 space-y-3 text-sm text-amber-200/80 border-t border-amber-200/10 pt-4 cursor-default" onClick={(e) => e.stopPropagation()}>
+                    {log.animalType && (
+                      <p className="font-semibold text-amber-200">
+                        Vad: {log.animalType}
+                      </p>
+                    )}
+                    {log.notes && <p>{log.notes}</p>}
+                    {log.imageUrl && (
+                      <img
+                        src={resolveAssetUrl(log.imageUrl)}
+                        alt="Hunting log"
+                        className="rounded-2xl border border-amber-200/10 mt-4 max-h-96 object-cover"
+                      />
+                    )}
+                  </div>
+                )}
               </article>
-            ))}
+            );
+          })}
       </div>
     </div>
   );

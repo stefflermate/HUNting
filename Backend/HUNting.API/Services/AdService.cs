@@ -55,6 +55,11 @@ namespace HUNting.API.Services
                 query = query.Where(a => a.Price <= options.MaxPrice.Value);
             }
 
+            if (options.OwnerUserId.HasValue)
+            {
+                query = query.Where(a => a.OwnerUserId == options.OwnerUserId.Value);
+            }
+
             var total = await query.CountAsync();
 
             var items = await query

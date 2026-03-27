@@ -18,8 +18,9 @@ export function AdsListPage() {
   const [categoryId, setCategoryId] = useState<number | undefined>();
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
+  const [showMyAds, setShowMyAds] = useState(false);
   const [page, setPage] = useState(1);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const { data: categories } = useQuery<AdCategoryItem[]>({
     queryKey: ["ad-categories"],
@@ -28,7 +29,7 @@ export function AdsListPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [categoryId, search, minPrice, maxPrice]);
+  }, [categoryId, search, minPrice, maxPrice, showMyAds]);
 
   const { data, isFetching } = useQuery<PaginatedResult<AdListItem>>({
     queryKey: [
@@ -37,6 +38,7 @@ export function AdsListPage() {
       search,
       minPrice,
       maxPrice,
+      showMyAds,
       page,
     ],
     queryFn: () =>
@@ -45,6 +47,7 @@ export function AdsListPage() {
         search: search.trim() || undefined,
         minPrice: minPrice ? Number(minPrice) : undefined,
         maxPrice: maxPrice ? Number(maxPrice) : undefined,
+        ownerUserId: showMyAds && user ? user.id : undefined,
         page,
         take: PAGE_SIZE,
       }),
@@ -60,6 +63,7 @@ export function AdsListPage() {
     setCategoryId(undefined);
     setMinPrice("");
     setMaxPrice("");
+    setShowMyAds(false);
   };
 
   return (
@@ -152,7 +156,20 @@ export function AdsListPage() {
                 </div>
               </div>
 
-              <div className="sm:col-span-2 md:col-span-3 flex justify-end mt-2">
+              <div className="sm:col-span-2 md:col-span-3 flex justify-between items-center mt-2">
+                {isAuthenticated ? (
+                  <label className="flex items-center gap-2 text-sm text-amber-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showMyAds}
+                      onChange={(e) => setShowMyAds(e.target.checked)}
+                      className="form-checkbox rounded border-amber-400/30 bg-black/30 text-amber-400 focus:ring-amber-400/30"
+                    />
+                    Sajat hirdeteseim
+                  </label>
+                ) : (
+                  <div></div>
+                )}
                 <Button
                   type="button"
                   variant="ghost"

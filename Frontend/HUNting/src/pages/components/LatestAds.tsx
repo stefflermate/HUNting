@@ -15,10 +15,10 @@ export function LatestAds() {
       <header className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm uppercase tracking-[0.3em] text-amber-300/80">
-            Kiemelt ajánlatok
+            Hirdetesek
           </p>
           <h2 className="font-display text-3xl text-amber-100">
-            Válogatott vadászmeghívások
+            Legutobbi hirdetesek
           </h2>
           <p className="mt-2 max-w-2xl text-amber-200/80">
             Frissen feladott hirdetések társaságoktól és megbízható vadászoktól. Szűrj régióra, vadfajra vagy tapasztalati szintre a hirdetések között.

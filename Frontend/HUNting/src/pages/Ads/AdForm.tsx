@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { adsApi } from "@/services/adsApi";
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import type {
   AdPayload,
   AdCategoryItem,
-  AdStatusItem,
   AdImage,
 } from "@/types";
 
@@ -44,12 +43,6 @@ type AdFormProps = {
   serverError?: string | null;
   onSubmit(data: AdFormSubmitArgs): Promise<void>;
 };
-
-const fallbackStatuses: AdStatusItem[] = [
-  { statusCode: "ACTIVE", description: "Aktiv" },
-  { statusCode: "PENDING", description: "Ellenorzes alatt" },
-  { statusCode: "SOLD", description: "Lezarva" },
-];
 
 export function AdForm({
   initialValues,
@@ -89,11 +82,6 @@ export function AdForm({
     queryFn: adsApi.categories,
   });
 
-  const { data: statuses } = useQuery<AdStatusItem[]>({
-    queryKey: ["ad-statuses"],
-    queryFn: adsApi.statuses,
-  });
-
   useEffect(() => {
     setTitle(initialValues?.title ?? "");
     setDescription(initialValues?.description ?? "");
@@ -130,11 +118,6 @@ export function AdForm({
       pendingImages.forEach((image) => URL.revokeObjectURL(image.preview));
     };
   }, [pendingImages]);
-
-  const statusOptions = useMemo(
-    () => (statuses && statuses.length > 0 ? statuses : fallbackStatuses),
-    [statuses]
-  );
 
   const handleFiles = (files: FileList | File[]) => {
     const accepted = Array.from(files).filter((file) =>
@@ -309,24 +292,6 @@ export function AdForm({
             onChange={(event) => setPrice(event.target.value)}
             className="w-full rounded-xl border border-amber-400/30 bg-black/30 px-4 py-3 text-amber-100 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
           />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm text-amber-200/80" htmlFor="status">
-            Statusz
-          </label>
-          <select
-            id="status"
-            value={statusCode}
-            onChange={(event) => setStatusCode(event.target.value)}
-            className="w-full rounded-xl border border-amber-400/30 bg-black/30 px-4 py-3 text-sm text-amber-100 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-300/40"
-          >
-            {statusOptions.map((status) => (
-              <option key={status.statusCode} value={status.statusCode}>
-                {status.description ?? status.statusCode}
-              </option>
-            ))}
-          </select>
         </div>
 
         <div className="md:col-span-2 space-y-2">

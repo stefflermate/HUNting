@@ -8,9 +8,6 @@ const baseURL =
 export const apiClient = axios.create({
   baseURL,
   withCredentials: true,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -24,6 +21,13 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("hunting.accessToken");
+        localStorage.removeItem("hunting.user");
+        window.location.href = "/auth/login";
+      }
+    }
     const fallbackMessage = "Request failed";
     if (error.response?.data?.message) {
       return Promise.reject(new Error(error.response.data.message));

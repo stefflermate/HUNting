@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Loader2 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -70,7 +71,24 @@ export function Chatbot() {
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] rounded-lg p-3 text-sm ${msg.role === 'user' ? 'bg-green-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
-                  {msg.content}
+                  <div className="break-words">
+                    <ReactMarkdown
+                      components={{
+                        h1: ({node, ...props}) => <h1 className="text-xl font-bold mt-2 mb-1" {...props} />,
+                        h2: ({node, ...props}) => <h2 className="text-lg font-bold mt-2 mb-1" {...props} />,
+                        h3: ({node, ...props}) => <h3 className="text-md font-bold mt-2 mb-1" {...props} />,
+                        h4: ({node, ...props}) => <h4 className="text-base font-bold mt-1 mb-1" {...props} />,
+                        p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
+                        ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-2" {...props} />,
+                        ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-2" {...props} />,
+                        li: ({node, ...props}) => <li className="mb-1" {...props} />,
+                        strong: ({node, ...props}) => <strong className="font-bold" {...props} />,
+                        em: ({node, ...props}) => <em className="italic" {...props} />,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               </div>
             ))}
@@ -87,7 +105,7 @@ export function Chatbot() {
           <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
             <input
               type="text"
-              className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+              className=" text-black flex-1 border border-black rounded-full px-4 py-2 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
               placeholder="Írj egy üzenetet..."
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -105,7 +123,7 @@ export function Chatbot() {
       ) : (
         <button
           onClick={() => setIsOpen(true)}
-          className="bg-green-600 hover:bg-green-700 text-white rounded-full p-4 shadow-lg flex items-center justify-center transition-transform hover:scale-105"
+          className="bg-green-600 hover:bg-green-700 text-black rounded-full p-4 shadow-lg flex items-center justify-center transition-transform hover:scale-105"
         >
           <MessageCircle size={28} />
         </button>
