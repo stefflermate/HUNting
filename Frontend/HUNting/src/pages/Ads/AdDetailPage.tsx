@@ -153,9 +153,6 @@ export function AdDetailPage() {
               <MapPin className="size-4" />
               {data.locationText ?? "Rugalmas helyszin"}
             </span>
-            <span className="rounded-full border border-amber-400/40 px-3 py-1 text-xs uppercase tracking-[0.2em] text-amber-200/70">
-              {data.statusCode}
-            </span>
             <span>
               Kozzetetelve:{" "}
               {new Date(data.createdAt).toLocaleDateString("hu-HU", {

@@ -214,6 +214,7 @@ export interface MapPoint {
 export interface MapPolygonItem {
   polygonId: number;
   name?: string;
+  description?: string;
   visibilityCode: string;
   strokeColor?: string;
   fillColor?: string;

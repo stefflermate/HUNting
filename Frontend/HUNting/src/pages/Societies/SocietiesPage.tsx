@@ -1,27 +1,44 @@
 ﻿import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { societiesApi } from "@/services/societiesApi";
 import { Button } from "@/components/ui/button";
-import { UsersRound, Crown } from "lucide-react";
+import { UsersRound, Crown, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export function SocietiesPage() {
+  const [searchTerm, setSearchTerm] = useState("");
   const { data, isFetching } = useQuery({
     queryKey: ["societies"],
     queryFn: () => societiesApi.list(),
   });
 
+  const filteredData = data?.filter((s) =>
+    s.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-8">
-      <header className="rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-8 shadow-lg">
-        <p className="text-sm uppercase tracking-[0.3em] text-amber-300/80">
-          Közösségi névsor
-        </p>
-        <h1 className="mt-2 font-display text-4xl text-amber-100">
-          Vadásztársaságok
-        </h1>
-        <p className="mt-3 max-w-2xl text-amber-200/80">
-          Böngészd a regisztrált magyar társaságokat, nézd meg a nyilvános profiljukat, és jelentkezz ahhoz a közösséghez, amelyik megfelel az elképzeléseidnek.
-        </p>
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-8 shadow-lg">
+        <div>
+          <p className="text-sm uppercase tracking-[0.3em] text-amber-300/80">
+            Közösségi névsor
+          </p>
+          <h1 className="mt-2 font-display text-4xl text-amber-100">
+            Vadásztársaságok
+          </h1>
+          <p className="mt-3 max-w-2xl text-amber-200/80">
+            Böngészd a regisztrált magyar társaságokat, nézd meg a nyilvános profiljukat, és jelentkezz ahhoz a közösséghez, amelyik megfelel az elképzeléseidnek.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl border border-amber-400/30 bg-black/30 px-4 py-3 text-amber-100 focus-within:border-amber-300 focus-within:ring-2 focus-within:ring-amber-300/40 w-full md:w-80">
+          <Search className="size-5 text-amber-300 flex-shrink-0" />
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Keresés név alapján..."
+            className="w-full bg-transparent text-base text-amber-100 outline-none placeholder:text-amber-200/60"
+          />
+        </div>
       </header>
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -36,7 +53,11 @@ export function SocietiesPage() {
                 <div className="mt-3 h-3 w-5/6 rounded bg-amber-200/10" />
               </div>
             ))
-          : data?.map((society) => (
+          : filteredData?.length === 0 ? (
+              <div className="col-span-full rounded-3xl border border-amber-200/10 bg-[#121b12]/80 p-8 text-center text-amber-200/80">
+                Nem talalhato a keresesnek megfelelo tarsasag.
+              </div>
+            ) : filteredData?.map((society) => (
               <article
                 key={society.societyId}
                 className="flex h-full flex-col gap-4 rounded-3xl border border-amber-200/10 bg-[#121b12]/90 p-6 shadow-inner shadow-black/20 transition hover:border-amber-400/50 hover:bg-[#182616]"

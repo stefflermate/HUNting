@@ -154,7 +154,7 @@ namespace HUNting.API.Controllers
         [HttpPost("{id:int}/images")]
         [Authorize]
         [RequestSizeLimit(10_485_760)]
-        public async Task<ActionResult<AdImage>> UploadImage(int id, IFormFile file)
+        public async Task<ActionResult<AdImage>> UploadImage(int id, [FromForm] IFormFile file)
         {
             if (file == null || file.Length == 0)
             {

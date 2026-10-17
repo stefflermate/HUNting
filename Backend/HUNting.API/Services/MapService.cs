@@ -130,6 +130,7 @@ namespace HUNting.API.Services
             }
 
             existing.Name = polygon.Name;
+            existing.Description = polygon.Description;
             existing.VisibilityCode = polygon.VisibilityCode;
             existing.StrokeColor = polygon.StrokeColor;
             existing.FillColor = polygon.FillColor;

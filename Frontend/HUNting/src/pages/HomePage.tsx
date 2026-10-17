@@ -1,10 +1,32 @@
 ﻿import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { FeatureGrid } from "@/pages/components/FeatureGrid";
 import { LatestAds } from "@/pages/components/LatestAds";
-import { LatestNews } from "@/pages/components/LatestNews";
+import { adsApi } from "@/services/adsApi";
+import { societiesApi } from "@/services/societiesApi";
 
 export function HomePage() {
+  const { data: adsData } = useQuery({
+    queryKey: ["home-ads-count"],
+    queryFn: () => adsApi.list({ take: 1, statusCode: "ACTIVE" }),
+  });
+
+  const { data: societies } = useQuery({
+    queryKey: ["home-societies-count"],
+    queryFn: () => societiesApi.list(),
+  });
+
+  const { data: categories } = useQuery({
+    queryKey: ["home-categories-count"],
+    queryFn: adsApi.categories,
+  });
+
+  const activeAdsCount = adsData?.total ?? 0;
+  const societiesCount = societies?.length ?? 0;
+  const membersCount = societies?.reduce((sum, s) => sum + (s.memberCount ?? 0), 0) ?? 0;
+  const categoriesCount = categories?.length ?? 0;
+
   return (
     <div className="space-y-24">
       <section className="relative isolate overflow-hidden rounded-3xl bg-gradient-to-r from-[#1b2a1c] via-[#223424] to-[#1b2a1c] p-10 shadow-2xl lg:flex lg:items-center lg:justify-between lg:p-16">
@@ -36,10 +58,10 @@ export function HomePage() {
         <div className="mt-10 max-w-md shrink-0 lg:mt-0 lg:max-w-lg">
           <div className="rounded-2xl border border-amber-300/10 bg-black/20 p-6 shadow-lg backdrop-blur">
             <div className="grid gap-4 sm:grid-cols-2">
-              <StatCard label="Aktív hirdetések" value="128" trend="+12 ezen a héten" />
-              <StatCard label="Regisztrált társaságok" value="42" trend="4 új ebben a hónapban" />
-              <StatCard label="Csatlakozott vadászok" value="2 540" trend="+180 az elmúlt 30 napban" />
-              <StatCard label="Közelgő események" value="19" trend="Naponta frissítve" />
+              <StatCard label="Aktív hirdetések" value={activeAdsCount.toLocaleString()} trend="Folyamatosan bővül" />
+              <StatCard label="Regisztrált társaságok" value={societiesCount.toLocaleString()} trend="Várják a jelentkezésed" />
+              <StatCard label="Társasági tagságok" value={membersCount.toLocaleString()} trend="Országszerte" />
+              <StatCard label="Kategóriák" value={categoriesCount.toLocaleString()} trend="Minden felszereléshez" />
             </div>
           </div>
         </div>
@@ -49,7 +71,6 @@ export function HomePage() {
 
       <FeatureGrid />
       <LatestAds />
-      <LatestNews />
     </div>
   );
 }

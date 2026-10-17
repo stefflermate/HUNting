@@ -16,6 +16,7 @@ type ListParams = {
   search?: string;
   minPrice?: number;
   maxPrice?: number;
+  ownerUserId?: number;
 };
 
 async function list(

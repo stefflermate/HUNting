@@ -4,9 +4,9 @@ import {
   GoogleMap,
   MarkerF,
   PolygonF,
-  InfoWindow,
+  InfoWindowF,
   useLoadScript,
-  DrawingManager,
+  DrawingManagerF,
 } from "@react-google-maps/api";
 import { mapApi } from "@/services/mapApi";
 import { societiesApi } from "@/services/societiesApi";
@@ -28,6 +28,7 @@ type MarkerDraft = {
 type PolygonDraft = {
   points: MapPoint[];
   name: string;
+  description: string;
   visibilityCode: string;
   strokeColor: string;
   fillColor: string;
@@ -71,6 +72,7 @@ const toNumber = (value: unknown): number => {
 const defaultPolygonDraft = (): PolygonDraft => ({
   points: [],
   name: "",
+  description: "",
   visibilityCode: "PUBLIC",
   strokeColor: "#22c55e",
   fillColor: "#22c55e55",
@@ -374,6 +376,7 @@ export function MapPage() {
 
     await polygonMutation.mutateAsync({
       name: polygonDraft.name || undefined,
+      description: polygonDraft.description || undefined,
       visibilityCode: polygonDraft.visibilityCode,
       strokeColor: polygonDraft.strokeColor,
       fillColor: polygonDraft.fillColor,
@@ -434,12 +437,7 @@ export function MapPage() {
           <div className="min-w-48 space-y-1 text-sm text-slate-800">
             <p className="font-semibold">{polygon.name || "Megnevezetlen terület"}</p>
             <p className="text-xs text-slate-600">{polygon.visibilityCode}</p>
-            <p className="text-xs">Pontok száma: {polygon.points.length}</p>
-            {polygon.strokeColor && (
-              <p className="text-xs">
-                Körvonal: <span style={{ color: polygon.strokeColor }}>{polygon.strokeColor}</span>
-              </p>
-            )}
+            {polygon.description && <p className="text-xs text-slate-700">{polygon.description}</p>}
           </div>
         ),
       };
@@ -602,8 +600,8 @@ export function MapPage() {
               fullscreenControl: true,
             }}
           >
-            {mode !== "view" && isAuthenticated && (
-              <DrawingManager options={drawingOptions} onPolygonComplete={handlePolygonComplete} />
+            {isAuthenticated && (
+              <DrawingManagerF options={drawingOptions} onPolygonComplete={handlePolygonComplete} />
             )}
 
             {normalizedMarkers.map((marker) => (
@@ -648,8 +646,23 @@ export function MapPage() {
                 }}
               />
             ))}
+
+            {polygonDraft && mode === "polygon" && polygonDraft.points.length > 2 && (
+              <PolygonF
+                path={polygonDraft.points.map((p) => ({ lat: p.latitude, lng: p.longitude }))}
+                options={{
+                  strokeColor: polygonDraft.strokeColor ?? "#22c55e",
+                  strokeOpacity: 1,
+                  strokeWeight: 2,
+                  fillColor: polygonDraft.fillColor ?? "#22c55e55",
+                  fillOpacity: polygonDraft.fillColor ? 0.45 : 0.25,
+                  clickable: false,
+                }}
+              />
+            )}
+
             {infoWindowData && (
-              <InfoWindow
+              <InfoWindowF
                 position={infoWindowData.position}
                 onCloseClick={() => {
                   setSelectedMarkerId(null);
@@ -657,7 +670,7 @@ export function MapPage() {
                 }}
               >
                 {infoWindowData.content}
-              </InfoWindow>
+              </InfoWindowF>
             )}
           </GoogleMap>
         )}
@@ -748,12 +761,18 @@ export function MapPage() {
             </Button>
           </div>
           {mode === "marker" && (
-            <p className="text-xs text-amber-200/70">Kattints a térképre a pont elhelyezéséhez, majd töltsd ki az adatokat.</p>
+            <div className="flex items-center justify-between gap-4 rounded-xl bg-amber-400/10 p-3">
+              <p className="text-xs text-amber-200/70">Kattints a térképre a pont elhelyezéséhez, majd töltsd ki az adatokat.</p>
+              <Button size="sm" variant="ghost" className="h-8 shrink-0 text-amber-200 hover:text-amber-100" onClick={() => { setMode("view"); setMarkerDraft(null); }}>Mégse</Button>
+            </div>
           )}
           {mode === "polygon" && (
-            <p className="text-xs text-amber-200/70">
-              Rajzold meg a terület körvonalát a térképen. Dupla kattintással zárhatod a poligont.
-            </p>
+            <div className="flex items-center justify-between gap-4 rounded-xl bg-amber-400/10 p-3">
+              <p className="text-xs text-amber-200/70">
+                Rajzold meg a terület körvonalát a térképen. Dupla kattintással zárhatod a poligont.
+              </p>
+              <Button size="sm" variant="ghost" className="h-8 shrink-0 text-amber-200 hover:text-amber-100" onClick={() => { setMode("view"); setPolygonDraft(null); }}>Mégse</Button>
+            </div>
           )}
         </div>
 
@@ -866,7 +885,10 @@ export function MapPage() {
           </div>
 
           <div className="flex justify-end gap-3">
-            <Button type="button" variant="ghost" onClick={() => setMarkerDraft(null)}>
+              <Button type="button" variant="ghost" onClick={() => {
+                setMarkerDraft(null);
+                setMode("view");
+              }}>
               Mégse
             </Button>
             <Button type="submit" disabled={markerMutation.isPending}>
@@ -890,6 +912,16 @@ export function MapPage() {
               className="w-full rounded-lg border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none"
               value={polygonDraft.name}
               onChange={(event) => setPolygonDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm text-amber-200/80">Leírás</label>
+            <textarea
+              className="w-full rounded-lg border border-amber-400/30 bg-black/30 px-3 py-2 text-sm text-amber-100 outline-none resize-none"
+              rows={2}
+              value={polygonDraft.description}
+              onChange={(event) => setPolygonDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))}
             />
           </div>
 
@@ -938,7 +970,10 @@ export function MapPage() {
           </div>
 
           <div className="flex justify-end gap-3">
-            <Button type="button" variant="ghost" onClick={() => setPolygonDraft(null)}>
+              <Button type="button" variant="ghost" onClick={() => {
+                setPolygonDraft(null);
+                setMode("view");
+              }}>
               Mégse
             </Button>
             <Button type="submit" disabled={polygonMutation.isPending}>

@@ -9,5 +9,6 @@ namespace HUNting.API.Services
         public string? StatusCode { get; set; }
         public decimal? MinPrice { get; set; }
         public decimal? MaxPrice { get; set; }
+        public int? OwnerUserId { get; set; }
     }
 }
