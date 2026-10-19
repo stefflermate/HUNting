@@ -1,0 +1,58 @@
+% ============================================================
+% IDEIGLENES főfájl — amíg a ftsrg/thesis-template-latex sablon
+% be nem kerül a projektbe. Akkor ezt a fájlt a sablon thesis.tex-e
+% váltja ki, a chapters/ fájlok pedig \include-dal illeszthetők át.
+% Fordítás: pdfLaTeX (Overleaf alapértelmezés).
+% ============================================================
+\documentclass[12pt,a4paper,oneside]{report}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[magyar]{babel}
+
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+% --- Kódrészletek alapbeállítása ---
+\lstset{
+	basicstyle=\ttfamily\small,
+	keywordstyle=\bfseries\color{blue!60!black},
+	commentstyle=\itshape\color{green!40!black},
+	stringstyle=\color{orange!70!black},
+	numbers=left,
+	numberstyle=\tiny\color{gray},
+	frame=single,
+	breaklines=true,
+	showstringspaces=false,
+	tabsize=4,
+	captionpos=b
+}
+\renewcommand{\lstlistingname}{kódrészlet}
+
+% --- Címlap-adatok (PLACEHOLDER — később kitöltendő) ---
+\title{HUNting -- Magyar Vadászati Közösségi és Hirdetési Portál fejlesztése}
+\author{SZERZŐ NEVE (placeholder)}
+\date{2026}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+% --- A gerinc előtti keretfejezetek (1--4.) később készülnek el; ---
+% --- a rájuk mutató \ref-ek addig ??-ként jelennek meg.          ---
+
+\setcounter{chapter}{4} % amíg az 1--4. fejezet hiányzik, így a következő fejezet 5-ösként számozódik
+
+\include{chapters/05_felhasznalokezeles}
+% \include{chapters/06_hirdetesek}        % következő fejezet
+% \include{chapters/07_tarsasagok}
+% \include{chapters/08_vadasznaplo}
+% \include{chapters/09_terkep}
+% \include{chapters/10_chatbot_idojaras}
+
+\end{document}

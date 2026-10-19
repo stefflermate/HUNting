@@ -171,5 +171,42 @@ namespace HUNting.API.Tests.Controllers
                 Assert.Null(dbNews);
             }
         }
+
+        [Fact]
+        public async Task Get_NonExistingId_ReturnsNotFound()
+        {
+            var dbName = Guid.NewGuid().ToString();
+            using var ctx = new HuntingContext(GetOptions(dbName));
+            var controller = new NewsController(ctx);
+
+            var result = await controller.Get(12345);
+
+            Assert.IsType<NotFoundResult>(result.Result);
+        }
+
+        [Fact]
+        public async Task Update_IdMismatch_ReturnsBadRequest()
+        {
+            var dbName = Guid.NewGuid().ToString();
+            using var ctx = new HuntingContext(GetOptions(dbName));
+            var controller = new NewsController(ctx);
+            var news = new NewsFeed { NewsFeedId = 2, Title = "Masik hir" };
+
+            var result = await controller.Update(1, news);
+
+            Assert.IsType<BadRequestResult>(result);
+        }
+
+        [Fact]
+        public async Task Delete_NonExistingNews_ReturnsNotFound()
+        {
+            var dbName = Guid.NewGuid().ToString();
+            using var ctx = new HuntingContext(GetOptions(dbName));
+            var controller = new NewsController(ctx);
+
+            var result = await controller.Delete(12345);
+
+            Assert.IsType<NotFoundResult>(result);
+        }
     }
 }

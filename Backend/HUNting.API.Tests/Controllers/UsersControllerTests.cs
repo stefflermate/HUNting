@@ -161,5 +161,33 @@ namespace HUNting.API.Tests.Controllers
             Assert.IsType<NoContentResult>(result);
             _userServiceMock.Verify(s => s.DeleteAsync(1), Times.Once);
         }
+
+        [Fact]
+        public async Task Update_IdMismatch_ReturnsBadRequest()
+        {
+            // Arrange
+            var request = new UserUpdateRequest(2, "Valaki Mas", "v@test.com", null, null);
+
+            // Act
+            var result = await _controller.Update(1, request);
+
+            // Assert
+            Assert.IsType<BadRequestResult>(result);
+            _userServiceMock.Verify(s => s.UpdateAsync(It.IsAny<ApplicationUser>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task Update_NonExistingUser_ReturnsNotFound()
+        {
+            // Arrange
+            _userServiceMock.Setup(s => s.GetByIdAsync(99)).ReturnsAsync((ApplicationUser?)null);
+            var request = new UserUpdateRequest(99, "Senki", "s@test.com", null, null);
+
+            // Act
+            var result = await _controller.Update(99, request);
+
+            // Assert
+            Assert.IsType<NotFoundResult>(result);
+        }
     }
 }

@@ -1,0 +1,362 @@
+% !TeX root = ../main.tex
+% 5. fejezet — Felhasználókezelés, jogosultságok és adminisztráció
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% Hivatkozott források: Backend/HUNting.API/Controllers/AuthController.cs, UsersController.cs,
+%   Services/Auth/JwtTokenService.cs, Configuration/JwtOptions.cs, Services/UserService.cs,
+%   Models/Users/ApplicationUser.cs, AccountType.cs, Program.cs, Data/SeedData.cs,
+%   Frontend/HUNting/src/context/AuthContext.tsx, lib/authStorage.ts, lib/apiClient.ts,
+%   services/authApi.ts, pages/Auth/LoginPage.tsx, RegisterPage.tsx, pages/Profile/ProfilePage.tsx,
+%   pages/Admin/AdminDashboardPage.tsx, services/adminApi.ts
+
+\chapter{Felhasználókezelés, jogosultságok és adminisztráció}
+\label{chap:felhasznalok}
+
+Ez a fejezet a dolgozat funkcióközpontú gerincének első tagja. A felhasználókezelés a HUNting
+minden további funkciójának előfeltétele: a hirdetésfeladás, a társasági tagság, a vadásznapló és
+a térképes rétegek egyaránt a bejelentkezett felhasználó személyazonosságára és szerepköreire
+épülnek. A fejezet a bevezetőben rögzített egységes sablont követi: először a funkció célját és
+felhasználói működését mutatom be, ezt követi az adatmodell, a backend- és a frontend-megvalósítás,
+végül a teljes adatfolyam, valamint a biztonsági megfontolások és az ismert korlátok összegzése.
+
+\section{A funkció célja és felhasználói működése}
+\label{sec:users-cel}
+
+A rendszer két, jogosultságaiban és felhasználói felületében is eltérő fióktípust különböztet meg,
+amelyet a backend az \texttt{AccountType} felsorolt típussal ír le
+(\texttt{Models/Users/AccountType.cs}): a \emph{Person} típus az egyéni vadászokat, a
+\emph{Society} típus a vadásztársaságokat képviseli. Egyéni fiókkal a felhasználó hirdetést adhat
+fel, társasági tagságot igényelhet, vadásznaplót vezethet és személyes térképrétegeket kezelhet.
+A társasági fiók ezzel szemben a társaság adminisztrációs felületét éri el: tagfelvételi kérelmeket
+bírál el, tagokat és bejegyzéseket kezel -- vadásznaplót azonban nem vezethet, és maga nem
+jelentkezhet más társaságba.
+
+A felhasználói folyamat a regisztrációval indul. A regisztrációs űrlapon egy kapcsolóval
+választható a fióktípus; társasági fiók esetén az űrlap kiegészül a társaság adataival (név,
+kapcsolattartási e-mail és telefon, rövid bemutatkozás). Sikeres regisztráció után a rendszer a
+felhasználót azonnal be is lépteti: a válasz már tartalmazza a hozzáférési tokent, így külön
+bejelentkezésre nincs szükség. A későbbi munkamenetek a bejelentkezési oldalon indulnak, ahol
+e-mail-cím és jelszó megadásával igényelhető új token. A bejelentkezett felhasználó a
+profiloldalon tekintheti át fiókadatait és szerepköreit, innen érhetők el a fióktípushoz kötött
+felületek (egyéni fióknál a „Társaságaim”, társasági fióknál a „Társaság kezelése” oldal), és itt
+található a kijelentkezés is. Védett oldal vendégként történő megnyitásakor az alkalmazás a
+bejelentkezési oldalra irányít át.
+
+% TODO: SC-12 képernyőkép (figures/sc-12-login.png) — a LoginPage mojibake-javítása UTÁN készüljön!
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-12: A bejelentkezési oldal képernyőképe (elkészítendő)}}
+	\caption{A HUNting bejelentkezési oldala}
+	\label{fig:login-screen}
+\end{figure}
+
+% TODO: SC-13 képernyőkép (figures/sc-13-register.png) — a fióktípus-váltó és a társasági mezők látszódjanak.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-13: A regisztrációs oldal társasági mezőkkel (elkészítendő)}}
+	\caption{Regisztráció társasági fióktípussal, a kiegészítő társasági adatokkal}
+	\label{fig:register-screen}
+\end{figure}
+
+\section{Adatmodell}
+\label{sec:users-adatmodell}
+
+A felhasználókat az ASP.NET Core Identity keretrendszer kezeli, amelyet a projekt egész számú
+elsődleges kulcsokkal használ. Az alkalmazás saját felhasználó-entitása, az
+\texttt{ApplicationUser} az \texttt{IdentityUser<int>} osztályból származik, és négy
+tartományspecifikus mezővel egészíti ki azt: a kötelező, legfeljebb 100 karakteres
+\texttt{FullName} névmezővel, az opcionális \texttt{Phone} telefonszámmal, a létrehozás
+időbélyegével (\texttt{CreatedAt}), valamint a fióktípust tároló \texttt{AccountType} mezővel
+(\texttt{Models/Users/ApplicationUser.cs}). Az entitás navigációs tulajdonságai a felhasználó
+kapcsolatait írják le: az \texttt{OwnedSociety} az általa birtokolt társaságra mutat (egy-egy
+kapcsolat), a \texttt{Societies} kollekció a tagságait, a \texttt{MembershipRequests} a benyújtott
+tagfelvételi kérelmeit, a \texttt{HuntingLogs} pedig a vadásznapló-bejegyzéseit tartalmazza.
+
+Az Identity alapértelmezett \texttt{AspNet*} előtagú tábláit a \texttt{HuntingContext} saját,
+beszédesebb nevekre képezi le (\texttt{Users}, \texttt{Roles}, \texttt{UserRoles},
+\texttt{UserClaims}, \texttt{UserLogins}, \texttt{RoleClaims}, \texttt{UserTokens}); az átnevezést
+a \texttt{RenameIdentityTables} migráció vezette át az adatbázissémán. Az e-mail-cím egyedisége
+két szinten is biztosított: az Identity konfigurációjában a \texttt{RequireUniqueEmail} beállítás,
+az adatbázisban pedig egyedi index garantálja. A társaság és tulajdonosa közötti egy-egy
+kapcsolatot a \texttt{Society.OwnerUserId} idegen kulcs valósítja meg; a tulajdonos felhasználó
+törlésekor a kapcsolat \texttt{SetNull} viselkedéssel szakad el, így a társaság rekordja nem vész
+el. Megjegyzendő, hogy a \texttt{Society} entitás saját \texttt{Email} és \texttt{PasswordHash}
+mezőkkel is rendelkezik, a bejelentkezés azonban kizárólag a felhasználói fiókon keresztül
+történik: társasági regisztrációkor a \texttt{PasswordHash} mezőbe csupán egy véletlen generált
+helykitöltő érték kerül.
+
+Az alkalmazásszintű szerepköröket az Identity szereptáblája tárolja. A kezdeti adatfeltöltés
+(\texttt{Data/SeedData.cs}) három szerepet hoz létre: az \emph{Administrator} a teljes rendszert
+felügyeli, a \emph{SocietyManager} a társasági fiókok alapértelmezett szerepe, a \emph{Hunter}
+pedig az egyéni vadászoké. Fontos megkülönböztetni ezektől a társaságon belüli szerepeket
+(\texttt{SocietyRole}: Vezeto, Gazda, Vador, Tag), amelyek nem az Identity részei, hanem a tagsági
+kapcsolatrekordhoz kötődnek; ezeket a~\ref{chap:tarsasagok}.~fejezet tárgyalja.
+
+\section{Backend-megvalósítás}
+\label{sec:users-backend}
+
+A hitelesítési funkciókat az \texttt{AuthController} valósítja meg, amely -- a rétegzett
+felépítéstől némileg eltérve -- nem egy dedikált szolgáltatásosztályra, hanem közvetlenül az
+Identity \texttt{UserManager} és \texttt{SignInManager} komponenseire, a tokengeneráláshoz pedig
+az \texttt{ITokenService} absztrakcióra támaszkodik. A~\ref{tab:auth-endpoints}.~táblázat a
+kontroller végpontjait foglalja össze.
+
+\begin{table}[htbp]
+	\centering
+	\caption{Az \texttt{AuthController} végpontjai}
+	\label{tab:auth-endpoints}
+	\begin{tabular}{|l|l|p{6.6cm}|}
+		\hline
+		\textbf{Végpont} & \textbf{Hozzáférés} & \textbf{Feladat} \\
+		\hline
+		POST \texttt{/api/Auth/register} & anonim & Fiók létrehozása (Person vagy Society), azonnali tokenkibocsátással \\
+		\hline
+		POST \texttt{/api/Auth/login} & anonim & Hitelesítés, JWT és felhasználói adatok visszaadása \\
+		\hline
+		POST \texttt{/api/Auth/logout} & bejelentkezett & Kijelentkezés (állapotmentes, 204-es válasz) \\
+		\hline
+		GET \texttt{/api/Auth/me} & bejelentkezett & Az aktuális felhasználó profilja, szerepei és birtokolt társasága \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\subsection{Regisztráció}
+
+A \texttt{Register} akció a kérés DTO-jából (\texttt{RegisterRequest} rekord) felépíti az
+\texttt{ApplicationUser} példányt, majd a \texttt{UserManager.CreateAsync} hívással hozza létre a
+fiókot; a jelszó hash-eléséről az Identity gondoskodik. Sikertelen létrehozás esetén a végpont
+szándékosan általános hibaüzenettel tér vissza, a konkrét okok felsorolása nélkül. Ezt követően a
+fiók a típusának megfelelő alapértelmezett szerepet kapja: társasági fiók esetén
+\emph{SocietyManager}, egyébként \emph{Hunter} szerepet.
+
+Társasági regisztrációnál a folyamat két további lépéssel bővül. A kontroller ellenőrzi, hogy a
+kérés tartalmazza-e a társaság nevét -- ennek hiányában hibával tér vissza --, majd létrehozza a
+\texttt{Society} entitást, tulajdonosként az imént regisztrált felhasználót megjelölve. Ha a
+seed-adatok között létezik a „Vezeto” elnevezésű társasági szerep, a rendszer a tulajdonost azonnal
+taggá is teszi ezzel a szereppel, így a társasági fiók a regisztráció pillanatától teljes körűen
+kezelheti saját társaságát. A válasz mindkét ágon a bejelentkezésével azonos szerkezetű: a
+kibocsátott tokent, annak lejáratát és a felhasználó adatait (\texttt{UserDto}) tartalmazza.
+
+\subsection{Bejelentkezés és tokenkibocsátás}
+
+A \texttt{Login} akció először e-mail-cím alapján keresi meg a felhasználót
+(\texttt{FindByEmailAsync}), majd a \texttt{SignInManager.CheckPasswordSignInAsync} hívással
+ellenőrzi a jelszót. Mindkét hibaág ugyanazt az általános üzenetet adja vissza („Hibás e-mail cím
+vagy jelszó.”), így a válaszból nem derül ki, hogy létezik-e fiók az adott címmel -- ez a
+felhasználó-felsorolásos (user enumeration) támadások elleni bevett védekezés. Sikeres hitelesítés
+után a \texttt{JwtTokenService} állítja elő a hozzáférési tokent
+(\ref{lst:jwt-token}.~kódrészlet).
+
+\begin{lstlisting}[language={[Sharp]C}, caption={A JWT előállítása a \texttt{JwtTokenService} osztályban (kivonat)}, label={lst:jwt-token}]
+var claims = new List<Claim>
+{
+    new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+    new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
+    new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+    new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+    new(ClaimTypes.Name, user.FullName),
+    new(ClaimTypes.Email, user.Email ?? string.Empty)
+};
+
+foreach (var role in roles)
+{
+    claims.Add(new Claim(ClaimTypes.Role, role));
+}
+
+claims.Add(new("account_type", user.AccountType.ToString()));
+
+var expires = DateTime.UtcNow.AddMinutes(_options.AccessTokenLifetimeMinutes);
+
+var jwt = new JwtSecurityToken(
+    issuer: _options.Issuer,
+    audience: _options.Audience,
+    claims: claims,
+    expires: expires,
+    signingCredentials: credentials);
+\end{lstlisting}
+
+A token a felhasználó azonosítóját, nevét és e-mail-címét, az összes alkalmazásszintű szerepét,
+valamint egy egyedi tokenazonosítót (\texttt{jti}) és a fióktípust leíró saját
+\texttt{account\_type} claimet hordozza. Az aláírás szimmetrikus kulcsú HMAC-SHA256 algoritmussal
+készül; a kulcsot, a kibocsátót, a célközönséget és az élettartamot (alapértelmezetten 60 perc) a
+konfiguráció \texttt{Jwt} szakaszából kötött \texttt{JwtOptions} beállításosztály szolgáltatja. A
+bejövő kérések tokenjeit a~\ref{chap:alapok}.~fejezetben bemutatott bearer-middleware validálja
+(kibocsátó-, célközönség- és aláírásellenőrzés, egyperces megengedett órakülönbséggel). A
+\texttt{Me} végpont a validált tokenből a \texttt{NameIdentifier} claim alapján azonosítja a
+felhasználót, és a friss adatbázis-állapotot adja vissza. A \texttt{Logout} végpont állapotmentes:
+kizárólag 204-es választ ad, a token érvényességét nem vonja vissza -- ennek következményeit
+a~\ref{sec:users-biztonsag}.~alfejezet tárgyalja.
+
+\subsection{A jogosultsági modell}
+
+A hozzáférés-szabályozás két szinten valósul meg. Az első szint deklaratív: a végpontokat az
+ASP.NET Core \texttt{[Authorize]} attribútuma védi, amely szerepkör-megkötéssel is ellátható -- a
+felhasználó-adminisztrációs kontroller például teljes egészében az
+\texttt{[Authorize(Roles = "Administrator")]} attribútummal zárja ki a nem adminisztrátor
+hívókat. A második szint imperatív, erőforrás-szintű ellenőrzés: a módosító műveletek a kérdéses
+rekord tulajdonosát vetik össze a tokenből kiolvasott felhasználó-azonosítóval, és az
+adminisztrátori szerep ez alól kivételt képez. Ezt a mintát szemlélteti
+a~\ref{lst:owner-check}.~kódrészlet a hirdetésmódosítás példáján; ugyanez az ellenőrzés ismétlődik
+a hirdetéstörlésben, a képkezelő végpontokban, a vadásznaplóban és a társasági bejegyzéseknél is.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={Erőforrás-tulajdonos ellenőrzés az \texttt{AdsController.Update} akcióban (kivonat)}, label={lst:owner-check}]
+var existing = await _svc.GetByIdAsync(id);
+if (existing == null) return NotFound();
+
+var userId = GetUserId();
+if (userId == null) return Unauthorized();
+
+var isAdmin = User.IsInRole("Administrator");
+if (!isAdmin && existing.OwnerUserId != userId.Value)
+{
+    return Forbid();
+}
+
+// ... mezok masolasa ...
+
+if (isAdmin)
+{
+    existing.OwnerUserId = ad.OwnerUserId;
+    existing.OwnerSocietyId = ad.OwnerSocietyId;
+}
+\end{lstlisting}
+
+A jogosultsági modell harmadik eleme a fióktípus szerinti korlátozás: egyes végpontok a token
+\texttt{account\_type} claimje, illetve a felhasználó rekordja alapján zárják ki a társasági
+fiókokat -- társasági fiók nem hozhat létre vadásznapló-bejegyzést
+(\ref{chap:naplo}.~fejezet), és nem nyújthat be tagfelvételi kérelmet
+(\ref{chap:tarsasagok}.~fejezet).
+
+\section{Frontend-megvalósítás}
+\label{sec:users-frontend}
+
+A kliensoldali hitelesítés központi eleme az \texttt{AuthContext} React-kontextus
+(\texttt{src/context/AuthContext.tsx}), amely az egész alkalmazást átfogó szolgáltatóként a
+bejelentkezett felhasználót és a hitelesítési műveleteket (\texttt{login}, \texttt{register},
+\texttt{logout}, \texttt{refreshProfile}) teszi elérhetővé. A munkamenet két értéken alapul,
+amelyeket az \texttt{authStorage} segédmodul a böngésző \texttt{localStorage} tárolójában kezel: a
+\texttt{hunting.accessToken} kulcs a JWT-t, a \texttt{hunting.user} kulcs a felhasználó
+szerializált profilját tárolja. A kontextus kezdeti állapotát a tárolt profilból állítja helyre,
+így az oldal újratöltése nem szakítja meg a munkamenetet; ha tokent talál profil nélkül, a
+felcsatolódáskor a \texttt{/auth/me} végpontról frissíti azt, sikertelenség esetén pedig kiüríti a
+tárolót.
+
+A bejelentkezési és regisztrációs művelet azonos sémát követ: az \texttt{authApi} szolgáltatásmodul
+meghívja a megfelelő végpontot -- a regisztrációnál a kliensoldali \texttt{name} mezőt a backend
+által várt \texttt{fullName} mezőre képezve át --, majd sikeres válasz esetén a token és a profil a
+tárolóba és a kontextus állapotába kerül. A hibákat a hívó űrlap kapja meg és jeleníti meg. A
+kijelentkezés először a backend \texttt{logout} végpontját hívja (ha van tárolt token), majd minden
+esetben kiüríti a tárolót és a kontextust.
+
+A kéréseket az \texttt{apiClient} axios-példány két elfogója (interceptor) egészíti ki. A
+kérés-elfogó minden hívás \texttt{Authorization} fejlécébe befűzi a tárolt tokent
+\texttt{Bearer} sémával. A válasz-elfogó a 401-es státuszú válaszokra globálisan reagál: törli a
+hitelesítési kulcsokat és a bejelentkezési oldalra irányítja a böngészőt -- így a lejárt vagy
+érvénytelen tokennel dolgozó munkamenet bármely védett hívás hatására automatikusan és egységesen
+kijelentkezik.
+
+Az oldalszintű hozzáférés-védelem nem központi útvonalőrrel (route guard), hanem az egyes
+oldalkomponensekben valósul meg. A profiloldal vendég látogatóját a \texttt{Navigate} komponens a
+bejelentkezési oldalra irányítja; a bejelentkezési és regisztrációs oldal a már hitelesített
+felhasználót az útvonalállapotban (\texttt{location.state.from}) átadott eredeti céloldalra --
+ennek hiányában a főoldalra -- lépteti tovább; az admin vezérlőpult pedig a szerepkörlista alapján
+dönt. A regisztrációs űrlap kliensoldali validációt is végez: a kötelező mezőket és az e-mail
+formátumát natív HTML-attribútumok ellenőrzik, a jelszóra hatkarakteres minimum vonatkozik
+(összhangban a szerveroldali Identity-szabályzattal), társasági fióktípusnál pedig a beküldés
+előfeltétele a társaságnév kitöltése.
+
+% TODO: SC-16 képernyőkép (figures/sc-16-profile.png)
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-16: A profiloldal képernyőképe (elkészítendő)}}
+	\caption{A profiloldal a fiókadatokkal, szerepkörökkel és a fióktípusfüggő gyorslinkekkel}
+	\label{fig:profile-screen}
+\end{figure}
+
+\section{Adminisztrációs felület}
+\label{sec:users-admin}
+
+A rendszergazdai funkciók két rétegből állnak. A backendoldali \texttt{UsersController} teljes
+felhasználó-adminisztrációt kínál (listázás, lekérdezés, létrehozás, módosítás, törlés), és --
+mint fentebb szerepelt -- kizárólag \emph{Administrator} szereppel érhető el. A létrehozó és
+módosító végpontok a szerepkiosztást is kezelik: a \texttt{UserService} a még nem létező szerepet
+automatikusan megteremti, a módosító akció pedig halmazkülönbség-képzéssel számítja ki az
+eltávolítandó és hozzáadandó szerepeket, így a kérésben megadott lista deklaratívan írja le a
+kívánt végállapotot.
+
+A frontendoldali admin vezérlőpult (\texttt{AdminDashboardPage}) két nézet között vált:
+hirdetések és felhasználók. Mindkét nézet lusta lekérdezést használ -- a React Query
+\texttt{enabled} kapcsolójával csak az aktív nézet adatai töltődnek be --, a törlőműveletek pedig
+natív megerősítő kérdés (\texttt{window.confirm}) után futnak le, majd a találati lista
+gyorsítótárát érvénytelenítve azonnal frissítik a felületet. A felület jelenleg listázásra és
+törlésre szorítkozik; a backend létrehozó és módosító végpontjaihoz nem tartozik felületi elem,
+ami a~\ref{sec:users-biztonsag}.~alfejezetben felsorolt korlátok egyike. Az adminisztrátor ezen
+felül a vadásznaplók teljes állományát is lekérdezheti a \texttt{scope=all} paraméterrel
+(\ref{chap:naplo}.~fejezet).
+
+% TODO: SC-14 képernyőkép (figures/sc-14-admin.png) — felhasználók nézet, törlés-megerősítéssel.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-14: Az admin vezérlőpult képernyőképe (elkészítendő)}}
+	\caption{Az adminisztrációs vezérlőpult felhasználókezelő nézete}
+	\label{fig:admin-screen}
+\end{figure}
+
+\section{Adatfolyam, biztonság és korlátok}
+\label{sec:users-biztonsag}
+
+A bejelentkezés teljes adatfolyama a következő lépésekből áll (a folyamatot
+a~\ref{fig:auth-sequence}.~ábra szemlélteti):
+
+\begin{enumerate}
+	\item A felhasználó kitölti a bejelentkezési űrlapot; a \texttt{LoginPage} az
+	      \texttt{AuthContext.login} műveletet hívja.
+	\item Az \texttt{authApi} a \texttt{POST /api/auth/login} végpontra küldi az e-mail-címet és a
+	      jelszót; a kérés-elfogó ekkor még nem fűz be tokent.
+	\item Az \texttt{AuthController} a \texttt{UserManager} segítségével megkeresi a felhasználót,
+	      majd a \texttt{SignInManager} ellenőrzi a jelszót a tárolt hash-sel szemben.
+	\item Siker esetén a \texttt{JwtTokenService} előállítja az aláírt tokent a szerepkör- és
+	      identitás-claimekkel.
+	\item A válaszból a kliens a tokent és a profilt a \texttt{localStorage}-ba menti, és frissíti a
+	      kontextus állapotát; a felület a bejelentkezett nézetre vált.
+	\item A további API-hívások \texttt{Authorization: Bearer} fejléccel utaznak; a middleware
+	      kérésenként validálja a tokent, és a claimekből állítja elő a felhasználó identitását.
+	\item Érvénytelen vagy lejárt token esetén a backend 401-gyel válaszol, amire a válasz-elfogó a
+	      tároló kiürítésével és a bejelentkezési oldalra történő átirányítással reagál.
+\end{enumerate}
+
+% TODO: B-01 szekvenciadiagram (figures/b-01-login-sequence.pdf) — LoginPage → AuthContext → axios →
+%       AuthController → SignInManager → JwtTokenService → localStorage.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering B-01: A bejelentkezés és tokenkibocsátás szekvenciadiagramja (elkészítendő)}}
+	\caption{A bejelentkezési folyamat szekvenciadiagramja}
+	\label{fig:auth-sequence}
+\end{figure}
+
+% TODO: B-02 folyamatábra (figures/b-02-request-auth.pdf) — kérések hitelesítése: Bearer-fejléc →
+%       validálás → claims → [Authorize]/szerep → erőforrás-tulajdonos ellenőrzés; 401-interceptor ág.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering B-02: A kérések hitelesítésének folyamatábrája (elkészítendő)}}
+	\caption{A védett kérések kiszolgálásának folyamata a tokenvalidálástól az erőforrás-szintű ellenőrzésig}
+	\label{fig:auth-flow}
+\end{figure}
+
+A megoldás több ponton követi a bevett biztonsági gyakorlatot: a jelszavakat az Identity
+alapértelmezett, PBKDF2 alapú hash-elése védi; a bejelentkezési hibaüzenet nem árulja el a fiók
+létezését; az e-mail-cím egyedisége adatbázisszinten kikényszerített; a token rövid élettartamú és
+aláírása kérésenként ellenőrzött; az erőforrás-szintű tulajdonos-ellenőrzés pedig megakadályozza,
+hogy egy hitelesített felhasználó más rekordjait módosítsa.
+
+Ugyanakkor a jelenlegi megvalósítás korlátait is rögzíteni kell. A jelszószabályzat tudatosan
+enyhített -- hat karakteres minimum, összetettségi követelmények nélkül --, ami éles üzemben
+szigorítandó. A kijelentkezés kizárólag kliensoldali: a kibocsátott token a lejáratáig érvényes
+marad, mivel sem visszavonási lista, sem frissítőtoken-mechanizmus nincs. A token
+\texttt{localStorage}-ban tárolása egyszerű és újratöltésálló, de XSS-támadás esetén a token
+kiolvasható -- ezt a kockázatot a keretrendszer kimeneti kódolása mérsékli, meg nem szünteti. A
+társasági regisztráció nem atomi művelet: ha a felhasználó létrehozása után a társaságnév
+hiányzik, a kérés hibával tér vissza, miközben a felhasználói fiók már létrejött. Az admin
+felhasználó-létrehozó és -módosító végpontok kivételei kezeletlenül 500-as válasszá alakulnak,
+felületi funkció pedig nem tartozik hozzájuk. Végül a kezdeti adatfeltöltésben rögzített
+adminisztrátori jelszó kizárólag fejlesztési környezetben elfogadható; éles telepítés előtt
+cserélendő, ahogyan a konfigurációban tárolt JWT-aláírókulcs is titokkezelőbe való.

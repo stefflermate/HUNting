@@ -157,5 +157,251 @@ namespace HUNting.API.Tests.Controllers
             Assert.IsType<NoContentResult>(result);
             _adServiceMock.Verify(s => s.DeleteAsync(5), Times.Once);
         }
+
+        private static IFormFile CreateFormFile(string fileName, long length = 100)
+        {
+            var fileMock = new Mock<IFormFile>();
+            fileMock.Setup(f => f.FileName).Returns(fileName);
+            fileMock.Setup(f => f.Length).Returns(length);
+            return fileMock.Object;
+        }
+
+        [Fact]
+        public async Task Categories_ReturnsOkWithList()
+        {
+            // Arrange
+            _adServiceMock.Setup(s => s.GetCategoriesAsync())
+                          .ReturnsAsync(new List<AdCategory> { new AdCategory { CategoryId = 1, Name = "Fegyver" } });
+
+            // Act
+            var result = await _controller.Categories();
+
+            // Assert
+            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            var categories = Assert.IsAssignableFrom<IEnumerable<AdCategory>>(okResult.Value);
+            Assert.Single(categories);
+        }
+
+        [Fact]
+        public async Task Statuses_ReturnsOkWithList()
+        {
+            // Arrange
+            _adServiceMock.Setup(s => s.GetStatusesAsync())
+                          .ReturnsAsync(new List<AdStatus> { new AdStatus { StatusCode = "ACTIVE" } });
+
+            // Act
+            var result = await _controller.Statuses();
+
+            // Assert
+            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            var statuses = Assert.IsAssignableFrom<IEnumerable<AdStatus>>(okResult.Value);
+            Assert.Single(statuses);
+        }
+
+        [Fact]
+        public async Task Create_ServiceThrowsArgumentException_ReturnsBadRequest()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.AddAsync(It.IsAny<Ad>())).ThrowsAsync(new ArgumentException("Ervenytelen kategoria."));
+
+            // Act
+            var result = await _controller.Create(new Ad { Title = "Hibas hirdetes" });
+
+            // Assert
+            Assert.IsType<BadRequestObjectResult>(result.Result);
+        }
+
+        [Fact]
+        public async Task Create_AsAdmin_KeepsProvidedOwner()
+        {
+            // Arrange
+            SetUserContext(10, "Administrator");
+            var ad = new Ad { Title = "Admin hirdetes", OwnerUserId = 5 };
+
+            // Act
+            var result = await _controller.Create(ad);
+
+            // Assert
+            Assert.IsType<CreatedAtActionResult>(result.Result);
+            Assert.Equal(5, ad.OwnerUserId);
+        }
+
+        [Fact]
+        public async Task Update_IdMismatch_ReturnsBadRequest()
+        {
+            // Arrange
+            SetUserContext(1);
+
+            // Act
+            var result = await _controller.Update(1, new Ad { AdId = 2 });
+
+            // Assert
+            Assert.IsType<BadRequestResult>(result);
+        }
+
+        [Fact]
+        public async Task Update_NonExistingAd_ReturnsNotFound()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.GetByIdAsync(99)).ReturnsAsync((Ad?)null);
+
+            // Act
+            var result = await _controller.Update(99, new Ad { AdId = 99 });
+
+            // Assert
+            Assert.IsType<NotFoundResult>(result);
+        }
+
+        [Fact]
+        public async Task Update_AsAdmin_CanReassignOwner()
+        {
+            // Arrange
+            SetUserContext(10, "Administrator");
+            var existing = new Ad { AdId = 5, OwnerUserId = 1 };
+            _adServiceMock.Setup(s => s.GetByIdAsync(5)).ReturnsAsync(existing);
+            var update = new Ad { AdId = 5, Title = "Uj cim", OwnerUserId = null, OwnerSocietyId = 3 };
+
+            // Act
+            var result = await _controller.Update(5, update);
+
+            // Assert
+            Assert.IsType<NoContentResult>(result);
+            Assert.Null(existing.OwnerUserId);
+            Assert.Equal(3, existing.OwnerSocietyId);
+        }
+
+        [Fact]
+        public async Task Delete_NonExistingAd_ReturnsNotFound()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.GetByIdAsync(99)).ReturnsAsync((Ad?)null);
+
+            // Act
+            var result = await _controller.Delete(99);
+
+            // Assert
+            Assert.IsType<NotFoundResult>(result);
+        }
+
+        [Fact]
+        public async Task Delete_OtherUsersAd_ReturnsForbid()
+        {
+            // Arrange
+            SetUserContext(2);
+            _adServiceMock.Setup(s => s.GetByIdAsync(5)).ReturnsAsync(new Ad { AdId = 5, OwnerUserId = 1 });
+
+            // Act
+            var result = await _controller.Delete(5);
+
+            // Assert
+            Assert.IsType<ForbidResult>(result);
+            _adServiceMock.Verify(s => s.DeleteAsync(It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task UploadImage_MissingFile_ReturnsBadRequest()
+        {
+            // Arrange
+            SetUserContext(1);
+
+            // Act
+            var result = await _controller.UploadImage(5, null!);
+
+            // Assert
+            Assert.IsType<BadRequestObjectResult>(result.Result);
+        }
+
+        [Fact]
+        public async Task UploadImage_NonExistingAd_ReturnsNotFound()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.GetByIdAsync(99)).ReturnsAsync((Ad?)null);
+
+            // Act
+            var result = await _controller.UploadImage(99, CreateFormFile("kep.jpg"));
+
+            // Assert
+            Assert.IsType<NotFoundResult>(result.Result);
+        }
+
+        [Fact]
+        public async Task UploadImage_NotOwner_ReturnsForbid()
+        {
+            // Arrange
+            SetUserContext(2);
+            _adServiceMock.Setup(s => s.GetByIdAsync(5)).ReturnsAsync(new Ad { AdId = 5, OwnerUserId = 1 });
+
+            // Act
+            var result = await _controller.UploadImage(5, CreateFormFile("kep.jpg"));
+
+            // Assert
+            Assert.IsType<ForbidResult>(result.Result);
+        }
+
+        [Fact]
+        public async Task UploadImage_InvalidExtension_ReturnsBadRequest()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.GetByIdAsync(5)).ReturnsAsync(new Ad { AdId = 5, OwnerUserId = 1 });
+
+            // Act
+            var result = await _controller.UploadImage(5, CreateFormFile("virus.exe"));
+
+            // Assert
+            Assert.IsType<BadRequestObjectResult>(result.Result);
+            _adServiceMock.Verify(s => s.AddImageAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task DeleteImage_NonExistingAd_ReturnsNotFound()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.GetByIdAsync(99)).ReturnsAsync((Ad?)null);
+
+            // Act
+            var result = await _controller.DeleteImage(99, 1);
+
+            // Assert
+            Assert.IsType<NotFoundResult>(result);
+        }
+
+        [Fact]
+        public async Task DeleteImage_ImageBelongsToOtherAd_ReturnsNotFound()
+        {
+            // Arrange
+            SetUserContext(1);
+            _adServiceMock.Setup(s => s.GetByIdAsync(5)).ReturnsAsync(new Ad { AdId = 5, OwnerUserId = 1 });
+            _adServiceMock.Setup(s => s.GetImageByIdAsync(7)).ReturnsAsync(new AdImage { ImageId = 7, AdId = 999, ImageUrl = "/uploads/ads/x.jpg" });
+
+            // Act
+            var result = await _controller.DeleteImage(5, 7);
+
+            // Assert
+            Assert.IsType<NotFoundResult>(result);
+            _adServiceMock.Verify(s => s.RemoveImageAsync(It.IsAny<AdImage>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task DeleteImage_AsOwner_RemovesImageAndReturnsNoContent()
+        {
+            // Arrange
+            SetUserContext(1);
+            var image = new AdImage { ImageId = 7, AdId = 5, ImageUrl = "/uploads/ads/torlendo.jpg" };
+            _adServiceMock.Setup(s => s.GetByIdAsync(5)).ReturnsAsync(new Ad { AdId = 5, OwnerUserId = 1 });
+            _adServiceMock.Setup(s => s.GetImageByIdAsync(7)).ReturnsAsync(image);
+
+            // Act
+            var result = await _controller.DeleteImage(5, 7);
+
+            // Assert
+            Assert.IsType<NoContentResult>(result);
+            _adServiceMock.Verify(s => s.RemoveImageAsync(image), Times.Once);
+        }
     }
 }
