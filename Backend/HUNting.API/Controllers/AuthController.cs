@@ -35,6 +35,14 @@ namespace HUNting.API.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
         {
+            // Társasági fióknál a társaság neve kötelező – még a felhasználó
+            // létrehozása előtt ellenőrizzük, hogy ne maradjon árva fiók.
+            if (request.AccountType == AccountType.Society &&
+                (request.Society == null || string.IsNullOrWhiteSpace(request.Society.Name)))
+            {
+                return BadRequest(new { message = "A társaság neve kötelező." });
+            }
+
             var user = new ApplicationUser
             {
                 FullName = request.FullName,
@@ -58,14 +66,9 @@ namespace HUNting.API.Controllers
             Society? ownedSociety = null;
             if (request.AccountType == AccountType.Society)
             {
-                if (request.Society == null || string.IsNullOrWhiteSpace(request.Society.Name))
-                {
-                    return BadRequest(new { message = "A társaság neve kötelező." });
-                }
-
                 ownedSociety = new Society
                 {
-                    Name = request.Society.Name,
+                    Name = request.Society!.Name,
                     Email = request.Society.Email ?? request.Email,
                     Phone = request.Society.Phone ?? request.Phone,
                     Description = request.Society.Description,

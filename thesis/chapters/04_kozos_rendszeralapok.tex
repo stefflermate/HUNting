@@ -2,7 +2,7 @@
 % 4. fejezet — Közös rendszeralapok
 % A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
 % Hivatkozott források: Backend/HUNting.API/Program.cs, Data/HuntingContext.cs, Data/SeedData.cs,
-%   Configuration/JwtOptions.cs, Services/GenericRepository.cs, IGenericRepository.cs,
+%   Configuration/JwtOptions.cs, Services/UploadStorage.cs, Controllers/ApiControllerBase.cs,
 %   Services/AdService.cs, SocietyService.cs, Controllers/* (végponttábla, feltöltési minta),
 %   Migrations/*, appsettings.json, Properties/launchSettings.json,
 %   Frontend/HUNting/src/main.tsx, App.tsx, routes/appRouter.tsx, layouts/AppLayout.tsx,
@@ -230,8 +230,6 @@ builder.Services.AddIdentityCore<ApplicationUser>(...)
 builder.Services.AddAuthentication(...).AddJwtBearer(...);
 builder.Services.AddCors(...);
 
-builder.Services.AddScoped(typeof(IGenericRepository<>),
-                           typeof(GenericRepository<>));
 builder.Services.AddScoped<IAdService, AdService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 // ... tovabbi service-regisztraciok ...
@@ -258,8 +256,7 @@ enyhített: hat karakteres minimumhossz mellett sem kis- és nagybetűt, sem sz�
 speciális karaktert nem követel meg -- ez a demonstrációs célú használatot könnyíti, éles
 üzemben szigorítandó. Az \emph{üzleti szolgáltatások} scoped életciklussal regisztrált
 interfész--implementáció párok (\texttt{IAdService}, \texttt{IUserService},
-\texttt{ISocietyService}, \texttt{IMapService}, \texttt{ITokenService}), kiegészítve a nyitott
-generikus \texttt{IGenericRepository<>} regisztrációval. A \emph{külső integrációt} az
+\texttt{ISocietyService}, \texttt{IMapService}, \texttt{ITokenService}). A \emph{külső integrációt} az
 \texttt{IOpenAiService} képviseli, amely típusos \texttt{HttpClient}-ként
 (\texttt{AddHttpClient}) regisztrálódik, így a keretrendszer kezeli a HTTP-kapcsolatok
 életciklusát (\ref{chap:chatbot}.~fejezet).
@@ -288,7 +285,7 @@ végpontkészletet dokumentálja és próbahívásokra is alkalmas
 	\label{fig:swagger}
 \end{figure}
 
-\subsection{Rétegzés: kontrollerek, szolgáltatások és a repository-minta}
+\subsection{Rétegzés: kontrollerek és szolgáltatások}
 
 A backend rétegzése a kontroller--szolgáltatás--adatelérés hármasra épül: a kontroller a
 HTTP-szintű feladatokat (útvonalillesztés, státuszkódok, jogosultság-ellenőrzés) látja el, az
@@ -306,16 +303,16 @@ Core kontextuson keresztül történik. A~\ref{fig:komponens}.~ábra a kontrolle
 	\label{fig:komponens}
 \end{figure}
 
-Fontos azonban rögzíteni, hogy a rétegzés nem egységes. Az \texttt{AdService} közvetlenül a
-\texttt{HuntingContext}-tel dolgozik; a \texttt{SocietyService} vegyesen használja a kontextust
-és a generikus repositoryt; a hírek kontrollere pedig szolgáltatásréteg nélkül, közvetlenül a
-kontextusra épül. A \texttt{GenericRepository<T>} maga is kompromisszumos konstrukció: a
-\texttt{GetByIdAsync} metódus futásidőben, az EF metaadataiból és kifejezésfák építésével állítja
-elő a kulcs szerinti szűrőfeltételt, ezért kizárólag egyszerű, egész típusú elsődleges kulcsú
-entitásokkal működik -- az összetett kulcsú kapcsolótáblákra nem alkalmazható --, továbbá a
-\texttt{SaveAsync} metódus révén a perzisztálás (a \emph{unit of work} felelősség) is a
-repositoryba csúszik. A dolgozat ezért a továbbiakban \emph{részleges} repository-mintáról
-beszél: ahol egy funkciófejezet a generikus repositoryt használja, ott ezt külön jelzi.
+Fontos azonban rögzíteni, hogy a rétegzés nem egységes. A szolgáltatásosztályok -- így az
+\texttt{AdService} és a \texttt{SocietyService} -- közvetlenül a \texttt{HuntingContext}-tel
+dolgoznak, külön repository-absztrakció nincs; a hírek és a vadásznapló kontrollere pedig
+szolgáltatásréteg nélkül, közvetlenül a kontextusra épül. A kontrollerekben ismétlődő
+segédlogika ugyanakkor két közös helyre szervezett: az \texttt{ApiControllerBase} ősosztály
+adja a bejelentkezett felhasználó azonosítójának kiolvasását, valamint a szerep- és
+fióktípus-ellenőrzéseket (\texttt{GetUserId}, \texttt{IsAdministrator},
+\texttt{IsSocietyAccount}), a statikus \texttt{UploadStorage} segédosztály pedig a
+képfeltöltések fájlrendszer-műveleteit végzi (lásd a közös megvalósítási mintáknál). Ahol egy
+funkciófejezet a rétegzéstől eltér, ott azt külön jelzi.
 
 \subsection{A JWT-infrastruktúra}
 
@@ -352,9 +349,12 @@ korlátozza; a kiterjesztés fehérlistán (\texttt{.jpg}, \texttt{.jpeg}, \text
 \texttt{.webp}) ellenőrződik; a fájl ütközésmentes, GUID-alapú nevet kap, és a
 \texttt{wwwroot/uploads} tartományspecifikus alkönyvtárába (\texttt{ads}, \texttt{societies},
 \texttt{logs}) kerül; az adatbázisban csak a relatív URL tárolódik, amelyet a statikus
-fájl-middleware szolgál ki; a rekord törlésekor a hozzá tartozó fájl is törlődik. A minta
+fájl-middleware szolgál ki; a rekord törlésekor a hozzá tartozó fájl is törlődik. A közös
+lépéseket (kiterjesztés-ellenőrzés, könyvtár-előkészítés, mentés, törlés) a statikus
+\texttt{UploadStorage} segédosztály (\texttt{Services/UploadStorage.cs}) végzi, így a
+feltöltéskezelő kód nem ismétlődik kontrollerenként. A minta
 korlátja, hogy a tartalom-ellenőrzés a kiterjesztésre szorítkozik (a fájl tényleges MIME-típusát
-a szerver nem vizsgálja), és a feltöltéskezelő segédkód kontrollerenként duplikálódik.
+a szerver nem vizsgálja).
 
 \paragraph{A végpontkészlet.} Az API nyolc kontrollere összesen 49 végpontot kínál;
 a~\ref{tab:endpoint-osszes}.~táblázat ezek megoszlását összegzi. A részletes végponttáblák --
@@ -500,8 +500,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem("hunting.accessToken");
-      localStorage.removeItem("hunting.user");
+      purgeAuthStorage();
       window.location.href = "/auth/login";
     }
     if (error.response?.data?.message) {

@@ -1,5 +1,4 @@
 using System.Linq;
-using System.Security.Claims;
 using HUNting.API.Models.Map;
 using HUNting.API.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -9,7 +8,7 @@ namespace HUNting.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class MapController : ControllerBase
+    public class MapController : ApiControllerBase
     {
         private readonly IMapService _service;
 
@@ -279,12 +278,6 @@ namespace HUNting.API.Controllers
             {
                 return Forbid();
             }
-        }
-
-        private int? GetUserId()
-        {
-            var id = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            return int.TryParse(id, out var value) ? value : (int?)null;
         }
 
         public record MapLayerQuery(string? Scope, int? SocietyId);

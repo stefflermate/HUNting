@@ -176,9 +176,10 @@ védelmet alkalmaz: üres fájl esetén azonnali hibával tér vissza, a fájln�
 kisbetűsítve fehérlistával veti össze (csak \texttt{.jpg}, \texttt{.jpeg}, \texttt{.png} és
 \texttt{.webp} engedélyezett), a lemezre pedig nem az eredeti fájlnéven, hanem újonnan generált
 GUID néven ír -- ezzel kizárva az útvonal-befecskendezést és a fájlnév-ütközést. A fájl a webes
-gyökér \texttt{uploads/ads} könyvtárába kerül (a könyvtárat a kontroller szükség esetén
-létrehozza), az adatbázisba csak a relatív URL íródik, a kiszolgálást pedig a statikus
-fájl-middleware végzi. Az \texttt{AdService.AddImageAsync} a rendezőszámot a meglévő képek
+gyökér \texttt{uploads/ads} könyvtárába kerül (a mentést és a könyvtár szükség szerinti
+létrehozását a közös \texttt{UploadStorage} segédosztály végzi,
+\ref{sec:alapok-backend}.~alfejezet), az adatbázisba csak a relatív URL íródik, a kiszolgálást
+pedig a statikus fájl-middleware végzi. Az \texttt{AdService.AddImageAsync} a rendezőszámot a meglévő képek
 maximuma alapján, folytatólagosan osztja ki. Kép törlésekor a végpont ellenőrzi, hogy a kép
 valóban az útvonalban megadott hirdetéshez tartozik-e, majd a lemezen tárolt fájlt és az
 adatbázisrekordot is eltávolítja.

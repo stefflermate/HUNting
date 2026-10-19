@@ -7,12 +7,10 @@ namespace HUNting.API.Services
     public class SocietyService : ISocietyService
     {
         private readonly HuntingContext _ctx;
-        private readonly IGenericRepository<Society> _repo;
 
-        public SocietyService(HuntingContext ctx, IGenericRepository<Society> repo)
+        public SocietyService(HuntingContext ctx)
         {
             _ctx = ctx;
-            _repo = repo;
         }
 
         public async Task<IEnumerable<Society>> GetAllAsync() =>
@@ -42,23 +40,23 @@ namespace HUNting.API.Services
 
         public async Task AddAsync(Society s)
         {
-            await _repo.AddAsync(s);
-            await _repo.SaveAsync();
+            _ctx.Societies.Add(s);
+            await _ctx.SaveChangesAsync();
         }
 
         public async Task UpdateAsync(Society s)
         {
-            _repo.Update(s);
-            await _repo.SaveAsync();
+            _ctx.Societies.Update(s);
+            await _ctx.SaveChangesAsync();
         }
 
         public async Task DeleteAsync(int id)
         {
-            var s = await _repo.GetByIdAsync(id);
+            var s = await _ctx.Societies.FindAsync(id);
             if (s != null)
             {
-                _repo.Delete(s);
-                await _repo.SaveAsync();
+                _ctx.Societies.Remove(s);
+                await _ctx.SaveChangesAsync();
             }
         }
 

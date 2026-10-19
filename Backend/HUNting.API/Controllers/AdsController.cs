@@ -1,7 +1,5 @@
 using System;
-using System.IO;
 using System.Linq;
-using System.Security.Claims;
 using HUNting.API.Models;
 using HUNting.API.Models.Ads;
 using HUNting.API.Services;
@@ -14,7 +12,7 @@ namespace HUNting.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class AdsController : ControllerBase
+    public class AdsController : ApiControllerBase
     {
         private readonly IAdService _svc;
         private readonly IWebHostEnvironment _env;
@@ -61,7 +59,7 @@ namespace HUNting.API.Controllers
                 return Unauthorized();
             }
 
-            var isAdmin = User.IsInRole("Administrator");
+            var isAdmin = IsAdministrator;
             if (!isAdmin)
             {
                 ad.OwnerUserId = userId.Value;
@@ -96,7 +94,7 @@ namespace HUNting.API.Controllers
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
-            var isAdmin = User.IsInRole("Administrator");
+            var isAdmin = IsAdministrator;
             if (!isAdmin && existing.OwnerUserId != userId.Value)
             {
                 return Forbid();
@@ -141,8 +139,7 @@ namespace HUNting.API.Controllers
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
-            var isAdmin = User.IsInRole("Administrator");
-            if (!isAdmin && ad.OwnerUserId != userId.Value)
+            if (!IsAdministrator && ad.OwnerUserId != userId.Value)
             {
                 return Forbid();
             }
@@ -170,30 +167,21 @@ namespace HUNting.API.Controllers
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
-            var isAdmin = User.IsInRole("Administrator");
-            if (!isAdmin && ad.OwnerUserId != userId.Value)
+            if (!IsAdministrator && ad.OwnerUserId != userId.Value)
             {
                 return Forbid();
             }
 
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-            var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
-            if (!allowed.Contains(extension))
+            AdImage image;
+            try
             {
-                return BadRequest("Csak JPG, JPEG, PNG vagy WEBP fajl tamogatott.");
+                var imageUrl = await UploadStorage.SaveImageAsync(_env, "ads", file);
+                image = await _svc.AddImageAsync(id, imageUrl);
             }
-
-            var rootPath = EnsureUploadsDirectory();
-            var fileName = $"{Guid.NewGuid():N}{extension}";
-            var relativePath = Path.Combine("uploads", "ads", fileName).Replace("\\", "/");
-            var absolutePath = Path.Combine(rootPath, fileName);
-
-            await using (var stream = System.IO.File.Create(absolutePath))
+            catch (ArgumentException ex)
             {
-                await file.CopyToAsync(stream);
+                return BadRequest(ex.Message);
             }
-
-            var image = await _svc.AddImageAsync(id, "/" + relativePath);
 
             return Created(image.ImageUrl, image);
         }
@@ -208,8 +196,7 @@ namespace HUNting.API.Controllers
             var userId = GetUserId();
             if (userId == null) return Unauthorized();
 
-            var isAdmin = User.IsInRole("Administrator");
-            if (!isAdmin && ad.OwnerUserId != userId.Value)
+            if (!IsAdministrator && ad.OwnerUserId != userId.Value)
             {
                 return Forbid();
             }
@@ -220,52 +207,10 @@ namespace HUNting.API.Controllers
                 return NotFound();
             }
 
-            var rootUploads = GetUploadsRoot();
-            if (rootUploads != null)
-            {
-                var fileName = Path.GetFileName(image.ImageUrl);
-                var absolutePath = Path.Combine(rootUploads, fileName);
-                if (System.IO.File.Exists(absolutePath))
-                {
-                    System.IO.File.Delete(absolutePath);
-                }
-            }
+            UploadStorage.DeleteImage(_env, "ads", image.ImageUrl);
 
             await _svc.RemoveImageAsync(image);
             return NoContent();
-        }
-
-        private int? GetUserId()
-        {
-            var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            return int.TryParse(idClaim, out var id) ? id : null;
-        }
-
-        private string EnsureUploadsDirectory()
-        {
-            var root = _env.WebRootPath;
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                root = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-                Directory.CreateDirectory(root);
-                _env.WebRootPath = root;
-            }
-
-            var adsPath = Path.Combine(root, "uploads", "ads");
-            Directory.CreateDirectory(adsPath);
-            return adsPath;
-        }
-
-        private string? GetUploadsRoot()
-        {
-            var root = _env.WebRootPath;
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                root = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-            }
-
-            var adsPath = Path.Combine(root, "uploads", "ads");
-            return Directory.Exists(adsPath) ? adsPath : null;
         }
     }
 }

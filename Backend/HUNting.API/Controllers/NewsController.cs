@@ -1,5 +1,6 @@
 using HUNting.API.Data;
 using HUNting.API.Models.News;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,6 +34,7 @@ namespace HUNting.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "Administrator")]
         public async Task<ActionResult<NewsFeed>> Create(NewsFeed news)
         {
             news.CreatedAt = DateTime.UtcNow;
@@ -42,6 +44,7 @@ namespace HUNting.API.Controllers
         }
 
         [HttpPut("{id:int}")]
+        [Authorize(Roles = "Administrator")]
         public async Task<IActionResult> Update(int id, NewsFeed news)
         {
             if (id != news.NewsFeedId) return BadRequest();
@@ -51,6 +54,7 @@ namespace HUNting.API.Controllers
         }
 
         [HttpDelete("{id:int}")]
+        [Authorize(Roles = "Administrator")]
         public async Task<IActionResult> Delete(int id)
         {
             var n = await _ctx.NewsFeed.FindAsync(id);

@@ -1,8 +1,5 @@
-using System.Security.Claims;
-using System.IO;
 using HUNting.API.Data;
 using HUNting.API.Models.Societies;
-using HUNting.API.Models.Users;
 using HUNting.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
@@ -14,7 +11,7 @@ namespace HUNting.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class SocietiesController : ControllerBase
+    public class SocietiesController : ApiControllerBase
     {
         private readonly ISocietyService _svc;
         private readonly HuntingContext _ctx;
@@ -170,7 +167,7 @@ namespace HUNting.API.Controllers
             var isMember = await _ctx.SocietyMembers.AnyAsync(m => m.SocietyId == id && m.UserId == userId.Value);
             var isOwner = await _ctx.Societies.AnyAsync(s => s.SocietyId == id && s.OwnerUserId == userId.Value);
 
-            if (!isMember && !isOwner && !User.IsInRole("Administrator"))
+            if (!isMember && !isOwner && !IsAdministrator)
             {
                 return Forbid();
             }
@@ -200,7 +197,7 @@ namespace HUNting.API.Controllers
             {
                 try
                 {
-                    imageUrl = await SaveImageAsync(request.Image);
+                    imageUrl = await UploadStorage.SaveImageAsync(_env, "societies", request.Image);
                 }
                 catch (ArgumentException ex)
                 {
@@ -239,77 +236,14 @@ namespace HUNting.API.Controllers
             var post = await _ctx.SocietyPosts.FirstOrDefaultAsync(p => p.SocietyPostId == postId && p.SocietyId == id);
             if (post == null) return NotFound();
 
-            DeleteImage(post.ImageUrl);
+            UploadStorage.DeleteImage(_env, "societies", post.ImageUrl);
             await _svc.RemovePostAsync(id, postId);
             return NoContent();
         }
 
-        private int? GetUserId()
-        {
-            var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            return int.TryParse(idClaim, out var id) ? id : null;
-        }
-
-        private bool IsSocietyAccount()
-        {
-            var accountType = User.FindFirstValue("account_type");
-            return Enum.TryParse<AccountType>(accountType, true, out var parsed) && parsed == AccountType.Society;
-        }
-
         private bool IsOwnerOrAdmin(Society society, int userId)
         {
-            if (User.IsInRole("Administrator"))
-            {
-                return true;
-            }
-
-            return society.OwnerUserId == userId;
-        }
-
-        private async Task<string> SaveImageAsync(IFormFile file)
-        {
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-            var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
-            if (!allowed.Contains(extension))
-            {
-                throw new ArgumentException("Csak JPG, JPEG, PNG vagy WEBP fajl tamogatott.");
-            }
-
-            var uploadsRoot = EnsureUploadsDirectory();
-            var fileName = $"{Guid.NewGuid():N}{extension}";
-            var absolutePath = Path.Combine(uploadsRoot, fileName);
-
-            await using var stream = System.IO.File.Create(absolutePath);
-            await file.CopyToAsync(stream);
-
-            return "/uploads/societies/" + fileName;
-        }
-
-        private string EnsureUploadsDirectory()
-        {
-            var root = _env.WebRootPath;
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                root = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-                Directory.CreateDirectory(root);
-                _env.WebRootPath = root;
-            }
-
-            var societyPath = Path.Combine(root, "uploads", "societies");
-            Directory.CreateDirectory(societyPath);
-            return societyPath;
-        }
-
-        private void DeleteImage(string? url)
-        {
-            if (string.IsNullOrWhiteSpace(url)) return;
-            var uploads = EnsureUploadsDirectory();
-            var fileName = Path.GetFileName(url);
-            var absolutePath = Path.Combine(uploads, fileName);
-            if (System.IO.File.Exists(absolutePath))
-            {
-                System.IO.File.Delete(absolutePath);
-            }
+            return IsAdministrator || society.OwnerUserId == userId;
         }
     }
 

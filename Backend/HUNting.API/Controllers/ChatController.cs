@@ -28,7 +28,7 @@ public class ChatController : ControllerBase
             var response = await _openAiService.GetChatResponseAsync(request.History ?? new List<ChatMessage>(), request.Message);
             return Ok(new { reply = response });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return StatusCode(500, new { error = "Hiba történt a kérdés feldolgozása során. Kérjük, próbálja később." });
         }

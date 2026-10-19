@@ -68,7 +68,6 @@ builder.Services.AddCors(options =>
         });
 });
 
-builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IAdService, AdService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISocietyService, SocietyService>();

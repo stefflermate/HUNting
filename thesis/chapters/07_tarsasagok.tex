@@ -101,10 +101,9 @@ amely a társasággal és a szerzővel együtt kaszkádolva törlődik.
 \label{sec:soc-backend}
 
 A funkciót a \texttt{SocietiesController} és a \texttt{SocietyService} párosa valósítja meg. A
-szolgáltatás e funkciónál kettős adatelérést használ: a társaság-törzsadatok írását az
-\texttt{IGenericRepository<Society>} generikus tárolón keresztül végzi, az összetettebb
-lekérdezéseket és a kapcsolótáblák kezelését viszont közvetlenül a \texttt{HuntingContext}-en --
-ez a dolgozatban már jelzett részleges repository-minta legjobb példája. A végpontokat
+szolgáltatás minden adatelérési műveletét közvetlenül a \texttt{HuntingContext}-en végzi: a
+társaság-törzsadatok egyszerű CRUD-műveleteit éppúgy, mint az összetettebb lekérdezéseket és a
+kapcsolótáblák kezelését. A végpontokat
 a~\ref{tab:soc-endpoints}.~táblázat összegzi.
 
 \begin{table}[htbp]
@@ -259,14 +258,15 @@ A kódbázis a belső posztok mellett egy második, hasonló rendeltetésű enti
 a \texttt{NewsFeed} hírbejegyzést és a hozzá tartozó \texttt{NewsVisibility} láthatósági
 szótártáblát (\texttt{MEMBERS}, \texttt{PUBLIC}, \texttt{OFFICERS} kódokkal), két mintahírrel a
 kezdeti adatfeltöltésben. Fontos azonban őszintén rögzíteni a megvalósultság tényleges szintjét:
-a \texttt{NewsController} teljes CRUD-ot kínál, de \emph{egyetlen végpontján sincs autorizáció} --
-anonim hívó is létrehozhat, módosíthat és törölhet hírt --, a tárolt láthatósági kód szerinti
-szűrés nem valósul meg, a frontenden pedig a hírekhez semmilyen oldal vagy API-hívás nem tartozik
-(csupán egy előkészített típusdefiníció). A hírfolyam tehát \emph{backend-oldali előkészítésnek}
+a \texttt{NewsController} teljes CRUD-ot kínál -- az író végpontjait (létrehozás, módosítás,
+törlés) az \texttt{[Authorize]} attribútum adminisztrátori szerep-megkötése védi, az olvasó
+végpontok anonim hívhatók --, a tárolt láthatósági kód szerinti
+szűrés azonban nem valósul meg, a frontenden pedig a hírekhez semmilyen oldal vagy API-hívás nem
+tartozik. A hírfolyam tehát \emph{backend-oldali előkészítésnek}
 tekintendő, nem működő felhasználói funkciónak; a dolgozat a tagok felé irányuló tényleges
 kommunikációs csatornaként a \texttt{SocietyPost} bejegyzéseket dokumentálja. A hiányzó
-autorizáció a rendszer ismert biztonsági adóssága, amelyet a továbbfejlesztési irányok között
-(\ref{chap:osszefoglalas}.~fejezet) a hírfolyam felhasználói felületével együtt kell rendezni.
+láthatóságszűrést és felhasználói felületet a továbbfejlesztési irányok között
+(\ref{chap:osszefoglalas}.~fejezet) kell rendezni.
 
 A funkciócsoport további ismert korlátai: a katalógusoldal kiemelt „Jelentkezés tagságra” gombjához
 jelenleg nem tartozik eseménykezelő -- a működő jelentkezési űrlap a profiloldalon él --; a

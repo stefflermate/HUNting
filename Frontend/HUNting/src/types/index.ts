@@ -142,23 +142,6 @@ export interface SocietyPost {
   };
 }
 
-export interface NewsFeedItem {
-  newsFeedId: number;
-  title?: string;
-  content?: string;
-  imageUrl?: string;
-  visibilityCode: string;
-  createdAt: string;
-  author?: {
-    id: number;
-    name: string;
-  };
-  society?: {
-    societyId: number;
-    name: string;
-  };
-}
-
 export interface HuntingLogItem {
   huntingLogId: number;
   occurredAt: string;

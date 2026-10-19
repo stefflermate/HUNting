@@ -128,9 +128,11 @@ szándékosan általános hibaüzenettel tér vissza, a konkrét okok felsorolá
 fiók a típusának megfelelő alapértelmezett szerepet kapja: társasági fiók esetén
 \emph{SocietyManager}, egyébként \emph{Hunter} szerepet.
 
-Társasági regisztrációnál a folyamat két további lépéssel bővül. A kontroller ellenőrzi, hogy a
-kérés tartalmazza-e a társaság nevét -- ennek hiányában hibával tér vissza --, majd létrehozza a
-\texttt{Society} entitást, tulajdonosként az imént regisztrált felhasználót megjelölve. Ha a
+Társasági regisztrációnál a folyamat két további lépéssel bővül. A társaság nevének meglétét a
+kontroller még a felhasználói fiók létrehozása \emph{előtt} ellenőrzi -- ennek hiányában úgy tér
+vissza hibával, hogy félkész fiók sem marad az adatbázisban --, majd a fiók létrejötte után
+létrehozza a \texttt{Society} entitást, tulajdonosként az imént regisztrált felhasználót
+megjelölve. Ha a
 seed-adatok között létezik a „Vezeto” elnevezésű társasági szerep, a rendszer a tulajdonost azonnal
 taggá is teszi ezzel a szereppel, így a társasági fiók a regisztráció pillanatától teljes körűen
 kezelheti saját társaságát. A válasz mindkét ágon a bejelentkezésével azonos szerkezetű: a
@@ -197,6 +199,9 @@ rekord tulajdonosát vetik össze a tokenből kiolvasott felhasználó-azonosít
 adminisztrátori szerep ez alól kivételt képez. Ezt a mintát szemlélteti
 a~\ref{lst:owner-check}.~kódrészlet a hirdetésmódosítás példáján; ugyanez az ellenőrzés ismétlődik
 a hirdetéstörlésben, a képkezelő végpontokban, a vadásznaplóban és a társasági bejegyzéseknél is.
+A kódrészletben szereplő \texttt{GetUserId} és \texttt{IsAdministrator} segédtagokat a
+kontrollerek közös őse, az \texttt{ApiControllerBase} biztosítja
+(\ref{sec:alapok-backend}.~alfejezet).
 
 \begin{lstlisting}[language={[Sharp]C}, caption={Erőforrás-tulajdonos ellenőrzés az \texttt{AdsController.Update} akcióban (kivonat)}, label={lst:owner-check}]
 var existing = await _svc.GetByIdAsync(id);
@@ -205,7 +210,7 @@ if (existing == null) return NotFound();
 var userId = GetUserId();
 if (userId == null) return Unauthorized();
 
-var isAdmin = User.IsInRole("Administrator");
+var isAdmin = IsAdministrator;
 if (!isAdmin && existing.OwnerUserId != userId.Value)
 {
     return Forbid();

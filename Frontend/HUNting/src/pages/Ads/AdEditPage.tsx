@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { adsApi } from "@/services/adsApi";
@@ -74,28 +74,18 @@ export function AdEditPage() {
     );
   }
 
-  const initialValues = useMemo(
-    () => ({
-      title: data.title,
-      description: data.description,
-      categoryId: data.category?.categoryId,
-      price: data.price,
-      locationText: data.locationText,
-      statusCode: data.statusCode,
-      contactEmail: data.contactEmail,
-      contactPhone: data.contactPhone,
-    }),
-    [
-      data.title,
-      data.description,
-      data.category?.categoryId,
-      data.price,
-      data.locationText,
-      data.statusCode,
-      data.contactEmail,
-      data.contactPhone,
-    ]
-  );
+  // Szándékosan nem useMemo: a feltételes return-ök után hook nem hívható
+  // (Rules of Hooks), az AdForm pedig mezőnként figyeli a változásokat.
+  const initialValues = {
+    title: data.title,
+    description: data.description,
+    categoryId: data.category?.categoryId,
+    price: data.price,
+    locationText: data.locationText,
+    statusCode: data.statusCode,
+    contactEmail: data.contactEmail,
+    contactPhone: data.contactPhone,
+  };
 
   const handleSubmit = async ({
     payload,

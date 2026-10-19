@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getAccessToken } from "./authStorage";
+import { getAccessToken, purgeAuthStorage } from "./authStorage";
 
 const baseURL =
   import.meta.env.VITE_API_BASE_URL ??
@@ -23,8 +23,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       if (typeof window !== "undefined") {
-        localStorage.removeItem("hunting.accessToken");
-        localStorage.removeItem("hunting.user");
+        purgeAuthStorage();
         window.location.href = "/auth/login";
       }
     }

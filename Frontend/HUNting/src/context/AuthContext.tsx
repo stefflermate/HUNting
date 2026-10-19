@@ -53,8 +53,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setAccessToken(result.accessToken);
         setStoredUser(result.user);
         setUser(result.user);
-      } catch (error) {
-        throw error;
       } finally {
         setIsLoading(false);
       }
@@ -70,8 +68,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setAccessToken(result.accessToken);
         setStoredUser(result.user);
         setUser(result.user);
-      } catch (error) {
-        throw error;
       } finally {
         setIsLoading(false);
       }
