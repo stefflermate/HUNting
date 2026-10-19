@@ -1,0 +1,200 @@
+% !TeX root = ../main.tex
+% 9. fejezet — Térképes funkciók
+% Hivatkozott források: Backend/HUNting.API/Controllers/MapController.cs, Services/MapService.cs,
+%   Models/Map/*, Data/HuntingContext.cs, Frontend/HUNting/src/services/mapApi.ts,
+%   pages/Map/MapPage.tsx
+
+\chapter{Térképes funkciók}
+\label{chap:terkep}
+
+A térképmodul a HUNting térinformatikai komponense: megfigyelőpontok, etetők, veszélyhelyek és
+találkozási pontok, valamint vadászterület-határok rögzítését teszi lehetővé személyes és
+társasági rétegeken. A fejezet a kliensoldali Google Maps-integráció és a szerveroldali
+hatókör-kezelés (scope) együttműködését mutatja be -- ez a rendszer legösszetettebb
+kliens--szerver együttműködése.
+
+\section{A funkció célja és felhasználói működése}
+\label{sec:map-cel}
+
+A térképoldal Magyarország-középpontú Google-térképpel indul. A bejelentkezett felhasználó
+rétegválasztóból dönt: a „Saját jelölések” réteg a kizárólag általa rögzített, személyes
+objektumokat mutatja, emellett minden olyan társaság közös rétege is választható, amelynek tagja.
+Marker felvételéhez a felhasználó jelölő módba vált, a térképre kattintva kijelöli a pontot, majd
+ikontípust (például etető, megfigyelőpont), jegyzetet és láthatósági kódot rendel hozzá. Terület
+rajzolásához a rajzoló mód a Google rajzeszközét aktiválja: a csúcspontok lehelyezése után a
+terület nevet, leírást, körvonal- és kitöltőszínt, valamint láthatóságot kaphat. A rögzített
+objektumok a térkép melletti listában is megjelennek, onnan fókuszba hozhatók, és -- saját
+objektum esetén -- törölhetők; az információs ablak a jegyzetet, illetve a terület leírását
+mutatja.
+
+% TODO: SC-09 képernyőkép (figures/sc-09-map.png) — markerek + polygon-rajzolás közben; Google Maps kulcs kell.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-09: A térképoldal markerekkel és területrajzolással (elkészítendő)}}
+	\caption{A térképoldal: személyes réteg markerekkel és rajzolás alatt álló területtel}
+	\label{fig:map-screen}
+\end{figure}
+
+\section{Adatmodell}
+\label{sec:map-adatmodell}
+
+A térképi objektumokat hat entitás írja le (\texttt{Models/Map/}). A \texttt{MapMarker} egy
+pontszerű jelölés: koordinátapárját a rendszer \texttt{decimal} típusban tárolja (a lebegőpontos
+kerekítési hibák elkerülésére), ezen felül ikontípus-hivatkozást, opcionális jegyzetet,
+láthatósági kódot, valamint létrehozó- és opcionális társasági hivatkozást hordoz. Az
+ikontípusokat a \texttt{MapIconType} szótártábla adja (név, alapértelmezett szín, glif); a seed
+négy típust rögzít (Megfigyelopont, Eteto, Veszely, Talalkozo). A láthatósági kódok a
+\texttt{MapVisibility} referenciatáblában élnek (\texttt{PUBLIC}, \texttt{MEMBERS},
+\texttt{ADMIN}), karakterláncos kulccsal.
+
+A területeket a \texttt{MapPolygon} entitás és a hozzá tartozó \texttt{MapPolygonPoint}
+pontrekordok együttese írja le: a sokszög neve, leírása, színei és láthatósága mellett a
+csúcspontok külön táblában, \texttt{Seq} sorszámmal tárolódnak. A
+\texttt{(PolygonId, Seq)} párra egyedi index vonatkozik, így a csúcspontok sorrendje -- amely a
+sokszög alakját meghatározza -- adatbázisszinten is egyértelmű; a pontok a sokszöggel együtt
+kaszkádolva törlődnek. A létrehozó felhasználóra mutató idegen kulcs minden objektumnál
+\texttt{Restrict} viselkedésű, a társasági hivatkozás viszont kaszkád: a társaság törlése a közös
+rétegét is magával viszi.
+
+A kódbázis tartalmaz egy harmadik objektumcsaládot is: a \texttt{MapPath} útvonal-entitást és
+\texttt{MapPathPoint} pontjait, a sokszögekével azonos felépítésben, kész migrációval. Ezekhez
+azonban \emph{sem végpont, sem kliensoldali funkció nem tartozik} -- az útvonalrögzítés tehát az
+adatmodell szintjén előkészített, de meg nem valósított képesség, amelyet a dolgozat a
+továbbfejlesztési irányok között tart számon.
+
+\section{Backend-megvalósítás}
+\label{sec:map-backend}
+
+A \texttt{MapController} minden adatműveletet az \texttt{IMapService} szolgáltatásra bíz, és --
+e projektben egyedüliként -- a lekérdezésekhez \texttt{CancellationToken}-t is továbbít, így a
+kliens által megszakított kérések a szerveren sem futnak feleslegesen tovább. A
+\texttt{/api/Map/config} végpont a felület felépítéséhez szükséges referenciaadatokat (ikontípusok
+és láthatósági kódok) adja vissza egyetlen hívásban.
+
+\subsection{Hatókör-alapú olvasás}
+
+Az olvasó végpontokon nincs \texttt{[Authorize]} attribútum: a hozzáférést a kérés
+\texttt{scope} paramétere alapján, kézzel ellenőrzi a kontroller. A nyers paramétert egy kis
+értéktípus normalizálja (\ref{lst:map-scope}.~kódrészlet), ismeretlen vagy hiányzó hatókörnél
+pedig a válasz üres lista -- a végpont tehát anonim hívásra sem hibázik, de adatot sem ad ki.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={A hatókör-paraméter normalizálása (\texttt{MapLayerScope})}, label={lst:map-scope}]
+public readonly record struct MapLayerScope(string Value)
+{
+    public static MapLayerScope None => new("none");
+    public static MapLayerScope Personal => new("personal");
+    public static MapLayerScope Society => new("society");
+
+    public static MapLayerScope From(string? raw) =>
+        raw?.ToLowerInvariant() switch
+        {
+            "personal" => Personal,
+            "society" => Society,
+            _ => None
+        };
+}
+\end{lstlisting}
+
+A \texttt{personal} hatókör bejelentkezést követel, és a szolgáltatás azokra az objektumokra
+szűr, amelyeket a hívó hozott létre \emph{és} nem tartoznak társasághoz. A \texttt{society}
+hatókörnél a kontroller a társaság-azonosító megléte után a tagságot is ellenőrzi
+(\texttt{UserBelongsToSocietyAsync}); nem tag hívó 403-as választ kap. A társasági réteg tehát a
+tagok közös nézete: a lekérdezés a társaság \emph{összes} objektumát visszaadja, függetlenül
+attól, melyik tag rögzítette.
+
+\subsection{Írási műveletek és a pontok cseréje}
+
+Objektum létrehozásakor a kontroller a társasági réteghez kötést szintén tagsághoz köti, a
+láthatósági kód alapértelmezése \texttt{PUBLIC}. A sokszög csúcspontjait a kérésben érkező
+sorrend szerint, folytatólagos \texttt{Seq} sorszámmal képezi le pontrekordokká. Módosításkor és
+törléskor a jogosultságot a szolgáltatás \texttt{CanModify} szabálya dönti el: kizárólag az
+objektum \emph{létrehozója} módosíthat -- ez szigorúbb a többi funkciónál megismert
+tulajdonos-vagy-admin mintánál, és azt jelenti, hogy a társasági rétegen minden tag csak a saját
+jelöléseit kezelheti. Jogosulatlan kísérletnél a szolgáltatás \texttt{UnauthorizedAccessException}
+kivételt dob, amelyet a kontroller 403-as válaszra fordít. A sokszögmódosítás a pontok teljes
+cseréjével dolgozik (\ref{lst:map-points}.~kódrészlet): a meglévő pontrekordok törlése után az új
+pontlista kerül be -- az egyszerű és mindig konzisztens megoldás, amely kis pontszámnál
+hatékonyabb, mint a különbségalapú frissítés.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={A sokszög csúcspontjainak cseréje a \texttt{MapService.UpdatePolygonAsync} metódusban (kivonat)}, label={lst:map-points}]
+existing.Name = polygon.Name;
+existing.Description = polygon.Description;
+existing.VisibilityCode = polygon.VisibilityCode;
+existing.StrokeColor = polygon.StrokeColor;
+existing.FillColor = polygon.FillColor;
+existing.SocietyId = polygon.SocietyId;
+
+_context.MapPolygonPoints.RemoveRange(existing.Points);
+existing.Points = polygon.Points
+    .Select(pp => new MapPolygonPoint
+    {
+        Seq = pp.Seq,
+        Latitude = pp.Latitude,
+        Longitude = pp.Longitude
+    })
+    .ToList();
+
+await _context.SaveChangesAsync(cancellationToken);
+\end{lstlisting}
+
+A válaszok itt nem EF-entitások, hanem dedikált rekord-DTO-k (\texttt{MapMarkerResponse},
+\texttt{MapPolygonResponse}), statikus \texttt{FromEntity} leképezőkkel; a sokszögválasz a
+pontokat \texttt{Seq} szerint rendezve adja vissza -- a térképmodul e tekintetben a projekt
+legletisztultabb API-felületét nyújtja.
+
+\section{Frontend-megvalósítás}
+\label{sec:map-frontend}
+
+A \texttt{MapPage} a \texttt{@react-google-maps/api} könyvtárra épül: a Google Maps
+JavaScript-API-t a \texttt{useLoadScript} horog tölti be a \texttt{drawing} kiegészítő
+könyvtárral, magyar nyelvi és területi beállítással; az API-kulcsot a
+\texttt{VITE\_GOOGLE\_MAPS\_API\_KEY} környezeti változó adja. A deklaratív komponenskészlet
+(\texttt{MarkerF}, \texttt{PolygonF}, \texttt{InfoWindowF}, \texttt{DrawingManagerF}) a React
+állapotából rajzolja a térképet.
+
+A rétegválasztó bejegyzései a „Saját jelölések” rétegből és a felhasználó tagságaiból épülnek fel
+(ez utóbbiakat a \texttt{societiesApi.my} hívás adja), a kiválasztás pedig a markerek és a
+sokszögek lekérdezését vezérli: a React Query kulcsa a hatókört és a társaság-azonosítót is
+tartalmazza (\texttt{["map", "markers", scope, societyId]}), a lekérdezés pedig csak akkor
+engedélyezett, ha van API-kulcs és tényleges rétegválasztás. Rétegváltáskor az oldal minden
+szerkesztési vázlatot és kijelölést visszaállít, így a módok nem keveredhetnek rétegek között.
+
+A szerkesztés háromállapotú módvezérléssel működik (megtekintés, jelölő, rajzoló). Jelölő módban
+a térképre kattintás koordinátáiból vázlat (draft) készül, amelyet a felhasználó ikontípussal,
+jegyzettel és láthatósággal egészít ki; a mentés mutációja sikerkor a markerlekérdezéseket
+érvényteleníti. Rajzoló módban a \texttt{DrawingManagerF} adja a csúcspontokat; a kliens csak
+legalább három érvényes pontból álló sokszöget enged menteni. A megjelenítés előtt a kliens
+védekezően normalizál: a koordinátákat számmá alakítja (a vesszős tizedesjelölést is kezelve), és
+kiszűri az érvénytelen koordinátájú markereket, illetve a három pontnál kevesebbel rendelkező
+sokszögeket -- így a hibás adat nem törheti el a térképet. A teljes kliens--szerver folyamatot
+a~\ref{fig:map-flow}.~ábra foglalja össze.
+
+% TODO: M-01 folyamatábra (figures/m-01-map-flow.pdf) — rétegválasztás → scope-kérés →
+%       tagság-ellenőrzés → markerek/polygonok → rajzolás → mentés Seq-pontokkal.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering M-01: A térképi adatkezelés folyamatábrája (elkészítendő)}}
+	\caption{A térképi adatkezelés folyamata a rétegválasztástól a mentésig}
+	\label{fig:map-flow}
+\end{figure}
+
+\section{Adatfolyam, biztonság és korlátok}
+\label{sec:map-korlatok}
+
+A hozzáférés-szabályozás rétegei jól elválnak: a hatókör-alapú olvasás a személyes adatokat a
+létrehozóra, a társasági réteget a tagságra korlátozza; az írás bejelentkezéshez és társasági
+objektumnál tagsághoz kötött; a módosítás és törlés pedig szigorúan a létrehozóé. Ebből két
+tudatosan vállalt, de dokumentálandó korlát is következik. Egyrészt a \emph{láthatósági kód
+jelenleg címkeként működik}: a \texttt{PUBLIC}/\texttt{MEMBERS}/\texttt{ADMIN} érték eltárolódik
+és a felületen megjelenik, a lekérdezések azonban nem szűrnek rá -- a tényleges elérhetőséget
+kizárólag a hatókör-szabályok döntik el. Másrészt a \texttt{CanModify} szabály az adminisztrátort
+sem engedi kivételezni, és a társaság tulajdonosa sem kezelheti tagjai jelöléseit; a szolgáltatás
+kódjában elhelyezett megjegyzés szerint a szerepalapú finomítás későbbi bővítési pont.
+
+További korlátok: a kliens a meglévő objektumok \emph{szerkesztését} nem kínálja fel -- a
+módosító végpontok és a kliensoldali API-függvények (\texttt{updateMarker},
+\texttt{updatePolygon}) készen állnak, felületi művelet azonban csak a létrehozás és a törlés --;
+a térképoldalhoz végponttól végpontig tartó teszt nem készült, mert a Google Maps betöltése
+API-kulcshoz kötött; az útvonalak (\texttt{MapPath}) pedig a~\ref{sec:map-adatmodell}.~alfejezetben
+leírtak szerint csak előkészítettek. E pontok a továbbfejlesztési fejezetben
+(\ref{chap:osszefoglalas}.~fejezet) térnek vissza.

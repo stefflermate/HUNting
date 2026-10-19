@@ -1,0 +1,131 @@
+% !TeX root = ../main.tex
+% 1. fejezet — Bevezetés
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% Hivatkozott források: Backend/HUNting.API/Models/Users/AccountType.cs,
+%   thesis/planning/feature_matrix.md (funkciókör), Frontend/HUNting/src/routes/appRouter.tsx
+% MEGJEGYZÉS: az 1.4 alfejezet konkurens megoldásainak konkrét megnevezése a szerzővel
+%   egyeztetendő (ld. TODO-kommentek) — jelenleg kategóriaszinten, óvatos állításokkal íródott.
+
+\chapter{Bevezetés}
+\label{chap:bevezetes}
+
+\section{Motiváció és problémafelvetés}
+\label{sec:bev-motivacio}
+
+A vadászat Magyarországon szervezett keretek között, jellemzően vadásztársaságokban folyó
+tevékenység, amelynek mindennapjait sokrétű szervezési és adminisztrációs feladat kíséri. A
+társaságoknak kommunikálniuk kell tagjaikkal a közös vadászatokról, munkákról és hírekről;
+kezelniük kell a tagfelvételt; a vadászok eszközöket -- fegyvert, optikát, ruházatot,
+felszerelést -- adnak-vesznek egymás között; a területi tájékozódáshoz megfigyelőpontok, etetők
+és területhatárok ismerete szükséges; emellett a vadász saját vadászati eseményeiről is
+nyilvántartást kíván (vagy köteles) vezetni.
+
+Ezek az igények ma jellemzően egymástól független, az adott célra csak részben alkalmas
+csatornákon oszlanak szét: a társasági kommunikáció telefonon, levelezőlistákon vagy közösségi
+médiás csoportokban zajlik; az adásvétel általános célú hirdetési oldalakon vagy zárt
+csoportokban történik, ahol a vadászati eszközök sajátos kategóriái nem jelennek meg; a területi
+tudás gyakran papírtérképeken vagy egyszerűen a tagok fejében él; a naplóvezetés pedig
+papíralapú vagy táblázatkezelős. A széttagoltság többszörös adatrögzítést, információvesztést
+és belépési küszöböt jelent -- különösen az új tagok számára, akik a közösség hallgatólagos
+tudásához nehezen férnek hozzá.
+
+A dolgozat tárgya egy olyan webalkalmazás -- a \emph{HUNting} vadászati közösségi és hirdetési
+portál -- megtervezése és megvalósítása, amely ezeket az igényeket egyetlen, integrált
+rendszerben szolgálja ki: közös felhasználókezeléssel, egymásra épülő funkciókkal és egységes,
+magyar nyelvű felülettel.
+
+\section{A vadászati terület digitalizációs lehetőségei}
+\label{sec:bev-digitalizacio}
+
+A vadásztársadalom digitális eszközhasználatát kettősség jellemzi. Egyfelől a terület
+hagyományőrző: a közösségi élet személyes jelenlétre épül, az adminisztráció sok helyen ma is
+papíralapú. Másfelől az általános célú digitális csatornák -- közösségi médiás csoportok,
+üzenetküldő alkalmazások, apróhirdetési portálok -- használata a vadászok körében is
+mindennapos, ami jelzi, hogy a digitális eszközökkel szembeni ellenállás nem elvi, hanem
+kínálati kérdés: az általános célú eszközök nem képezik le a terület sajátosságait.
+
+Egy szakterületre szabott portál hozzáadott értéke éppen ebben rejlik. A tartományspecifikus
+fogalmak -- vadásztársaság, tagsági kérelem, társasági szerep, vadfaj, megfigyelőpont, etető --
+első osztályú entitásként jelenhetnek meg benne, nem pedig szabad szöveges bejegyzésekként egy
+általános platformon. Az integráció további előnye az adatok összekapcsolhatósága: ugyanaz a
+fiók ad fel hirdetést, igényel tagságot és vezet naplót; a társasági tagság jogosultságot
+adhat közös térképi rétegekhez; a hirdetés tulajdonosa lehet maga a társaság is. Ezek a
+kapcsolatok a széttagolt megoldásokban nem, vagy csak kézi egyeztetéssel valósulnak meg.
+
+\section{Az alkalmazás céljai és célcsoportjai}
+\label{sec:bev-celok}
+
+A HUNting két célcsoportot szolgál ki, amelyeket a rendszer két, jogosultságaiban és
+felületeiben eltérő fióktípusként kezel (a backend \texttt{AccountType} felsorolt típusa
+szerint): az \emph{egyéni vadászokat} (Person) és a \emph{vadásztársaságokat} (Society).
+E kettősség a rendszer egészén végigvonul, a regisztrációtól a menüszerkezetig
+(\ref{chap:felhasznalok}.~fejezet). A funkcionális célokat hat funkcióterület valósítja meg,
+amelyek egyben a dolgozat gerincfejezeteit is kijelölik:
+
+\begin{enumerate}[nosep]
+	\item \emph{felhasználókezelés, jogosultságok és adminisztráció} -- regisztráció a két
+	      fióktípussal, bejelentkezés, profil, admin-felület (\ref{chap:felhasznalok}.~fejezet);
+	\item \emph{hirdetési piactér} -- vadászati eszközök adásvétele kategóriákkal, szűréssel,
+	      képfeltöltéssel (\ref{chap:hirdetesek}.~fejezet);
+	\item \emph{vadásztársaságok és tagságkezelés} -- társaságkatalógus, tagfelvételi
+	      kérelmek életciklusa, tag- és bejegyzéskezelés (\ref{chap:tarsasagok}.~fejezet);
+	\item \emph{vadásznapló} -- személyes vadászati események rögzítése képekkel
+	      (\ref{chap:naplo}.~fejezet);
+	\item \emph{térképes funkciók} -- megfigyelőpontok, etetők, veszélyhelyek és területek
+	      személyes és társasági rétegeken (\ref{chap:terkep}.~fejezet);
+	\item \emph{AI-chatbot és időjárás} -- vadászati asszisztens és időjárás-tájékoztatás
+	      (\ref{chap:chatbot}.~fejezet).
+\end{enumerate}
+
+Nem funkcionális célként a rendszer magyar nyelvű, reszponzív (asztali és mobil nézetben
+egyaránt használható -- \ref{fig:home-responsive}.~ábra a~\ref{chap:alapok}.~fejezetben),
+valamint szerveroldalon kikényszerített jogosultsági modellre épül. Fontos a célok őszinte
+lehatárolása is: a rendszer demonstrációs érettségű -- éles üzemeltetésre, terheléses
+méretezésre és teljes biztonsági keményítésre nem készült fel; az ismert korlátokat minden
+funkciófejezet, összegzésüket a \ref{chap:teszteles}.~és a \ref{chap:osszefoglalas}.~fejezet
+tartalmazza.
+
+\section{Hasonló megoldások}
+\label{sec:bev-hasonlo}
+
+% TODO: a konkrét konkurens megoldások (nemzetközi vadásznapló-appok, hazai hirdetési
+% portálok) megnevezése és jellemzése a szerzővel egyeztetendő; az alábbi szöveg
+% kategóriaszinten, termékmegnevezés nélkül írja le a mezőnyt. Konkrét termékekről csak
+% publikus, ellenőrizhető információ alapján szabad állítást tenni.
+
+A HUNting által lefedett igényekre léteznek részmegoldások, ezek azonban jellemzően a terület
+egy-egy szeletét célozzák. A \emph{vadásznapló-alkalmazások} (elsősorban nemzetközi mobil
+appok) a vadászati események rögzítésére és részben térképes megjelenítésére szolgálnak,
+közösségi és hirdetési funkciók nélkül, és magyar lokalizációjuk többnyire hiányzik. Az
+\emph{általános hirdetési portálok} a vadászati eszközök adásvételét is hordozzák, de a
+tartományspecifikus kategorizálás és a vadászközösségi kontextus nélkül; a fegyverhirdetések
+kezelése ráadásul speciális szabályozási környezetet igényel. A \emph{közösségi médiás
+csoportok} a társasági kommunikáció leggyakoribb mai csatornái: belépési küszöbük alacsony,
+cserébe strukturálatlanok -- tagfelvételi folyamat, szerepek, naplózás vagy térképi rétegek
+nem fejezhetők ki bennük natívan.
+
+A HUNting elhatárolása e mezőnytől az \emph{integráció}: nem egy-egy részfunkcióban kíván a
+specializált megoldásoknál többet nyújtani, hanem a vadászati közösségi élet funkcióit kapcsolja
+össze egyetlen, közös fiók- és jogosultsági modellre épülő, magyar nyelvű rendszerben. A
+választott felépítés sajátossága a kettős fióktípus: a társaság nem csupán címke vagy csoport,
+hanem saját fiókkal, felülettel és jogosultságokkal rendelkező szereplő.
+
+\section{A dolgozat felépítése}
+\label{sec:bev-felepites}
+
+A dolgozat szerkezete a rendszer funkcióközpontú jellegét követi. A keretfejezetek közül
+a~\ref{chap:technologiak}.~fejezet a felhasznált technológiákat és választásuk indokait,
+a~\ref{chap:architektura}.~fejezet a háromrétegű architektúrát és a rétegek közötti
+kommunikációt, a~\ref{chap:alapok}.~fejezet pedig a minden funkció által közösen használt
+infrastruktúrát -- adatbázis-kontextust, backend-csővezetéket, kliensvázat -- mutatja be.
+
+A dolgozat gerincét a \ref{chap:felhasznalok}--\ref{chap:chatbot}.~funkciófejezetek adják.
+Mindegyikük azonos belső sablont követ: a funkció céljának és felhasználói működésének
+bemutatása után az adatmodellt, a backend-, majd a frontend-megvalósítást tárgyalja, végül a
+teljes adatfolyamot, a biztonsági megfontolásokat és -- őszinte felmérésként -- az ismert
+korlátokat összegzi. Ez a felépítés teszi lehetővé, hogy minden funkció a teljes vertikumában,
+az adatbázistól a felhasználói felületig egy helyen legyen olvasható.
+
+A gerincet két lezáró fejezet követi: a~\ref{chap:teszteles}.~fejezet a háromszintű
+tesztkészletet és a futtatási környezetet dokumentálja, a~\ref{chap:osszefoglalas}.~fejezet
+pedig az eredményeket összegzi és a továbbfejlesztési irányokat jelöli ki.

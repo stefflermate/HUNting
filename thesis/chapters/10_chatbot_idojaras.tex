@@ -1,0 +1,165 @@
+% !TeX root = ../main.tex
+% 10. fejezet — AI-chatbot és időjárás-integráció
+% Hivatkozott források: Backend/HUNting.API/Controllers/ChatController.cs,
+%   Services/OpenAiService.cs, Models/Chat/ChatRequest.cs, Program.cs,
+%   Frontend/HUNting/src/components/Chatbot.tsx, services/weatherService.ts,
+%   pages/Weather/WeatherPage.tsx
+
+\chapter{AI-chatbot és időjárás-integráció}
+\label{chap:chatbot}
+
+A gerinc utolsó fejezete a két külső szolgáltatásra épülő kiegészítő funkciót tárgyalja: a
+mesterséges intelligenciára épülő vadászati asszisztenst és az időjárás-lekérdezést. A fejezet
+egyben a funkciófejezetek egységes sablonjának határesete is: e funkciók \emph{nem használnak
+saját adatbázis-entitást} -- a chatbot állapotmentes (a beszélgetés csak a kliens memóriájában
+él), az időjárás pedig teljes egészében kliensoldali integráció --, ezért az adatmodell-szakasz
+helyét ennek indoklása veszi át, a hangsúly pedig a külső API-integrációk mérnöki részleteire
+kerül.
+
+\section{A chatbot célja és felhasználói működése}
+\label{sec:chat-cel}
+
+A „Vadászati Asszisztens” az alkalmazás minden fő oldalán elérhető, lebegő gombból nyitható
+csevegőablak, amely magyar nyelven válaszol vadászati, vadgazdálkodási és fegyverismereti
+kérdésekre -- tematikusan szűkítve az 1996. évi LV. törvény (a vad védelméről, a
+vadgazdálkodásról, valamint a vadászatról) és a fegyvertartási szabályozás körére, kiegészítve
+vadreceptekkel és időjárási témákkal. A felhasználó kötetlen szöveges kérdést tesz fel, a válasz
+formázott (címsorokat, felsorolásokat is tartalmazó) szövegként jelenik meg; a beszélgetés a
+munkamenet alatt folytatólagos, az ablak bezárásáig a korábbi üzenetek is láthatók. A widget a
+hitelesítési oldalakon nem jelenik meg, mert azokat külön elrendezés (\texttt{AuthLayout})
+szolgálja ki, amely nem tartalmazza a komponenst.
+
+% TODO: SC-15 képernyőkép (figures/sc-15-chatbot.png) — nyitott widget magyar válasszal; OpenAI-kulcs kell.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-15: A chatbot-widget megnyitva (elkészítendő)}}
+	\caption{A Vadászati Asszisztens csevegőablaka}
+	\label{fig:chatbot-screen}
+\end{figure}
+
+\section{A chatbot backend-megvalósítása}
+\label{sec:chat-backend}
+
+A \texttt{ChatController} egyetlen végpontot kínál (\texttt{POST /api/Chat}), amely a
+\texttt{ChatRequest} DTO-t fogadja: az új üzenetet és az eddigi beszélgetés üzenetlistáját
+(szerep--tartalom párok). Üres üzenetre 400-as hibával válaszol, az integráció bármely hibáját
+pedig általános, magyar nyelvű 500-as üzenetté alakítja -- a belső hibarészletek így nem
+szivárognak ki a kliens felé. Az érdemi munkát az \texttt{OpenAiService} végzi, amely a
+\texttt{Program.cs}-ben típusos HTTP-kliensként van regisztrálva
+(\texttt{AddHttpClient<IOpenAiService, OpenAiService>}), így a \texttt{HttpClient} életciklusát a
+keretrendszer gyára kezeli.
+
+A szolgáltatás működése négy lépésre bontható. Először a konfigurációból kiolvassa az
+\texttt{OpenAI:ApiKey} kulcsot; ennek hiányában naplózott kivétellel leáll -- a kulcs tehát nem a
+kódban, hanem a konfigurációban (fejlesztői gépen user secrets / \texttt{appsettings}) él.
+Másodszor összeállítja az üzenetlistát: az élére egy részletes magyar \emph{rendszerprompt} kerül,
+amely kijelöli az asszisztens szakterületét, megköveteli a témán kívüli kérdések udvarias
+elutasítását, és kifejezetten tiltja a nem létező jogszabályi adatok kitalálását. Harmadszor a
+kliens által küldött előzményeket \emph{szanitálva} fűzi be: a szerepmezőt fehérlistával
+ellenőrzi, és minden nem \texttt{user} vagy \texttt{assistant} értéket \texttt{user} szerepre ír
+át (\ref{lst:openai-request}.~kódrészlet) -- e nélkül egy rosszindulatú kliens
+\texttt{system} szerepű üzenettel felülbírálhatná a rendszerpromptot (prompt-injekció). Végül a
+kérés a \texttt{gpt-4o} modellel, alacsony (0{,}2) hőmérséklettel -- azaz konzervatív,
+tényközpontú beállítással -- és 1500 tokenes válaszkorláttal megy az OpenAI
+chat-completions végpontjára, Bearer-fejlécben vitt kulccsal.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={Az előzmények szanitálása és a kérés összeállítása az \texttt{OpenAiService} osztályban (kivonat, megjegyzések nélkül)}, label={lst:openai-request}]
+var messages = new List<object>
+{
+    new { role = "system", content = systemPrompt }
+};
+
+foreach (var msg in history)
+{
+    var role = msg.Role == "user" || msg.Role == "assistant" ? msg.Role : "user";
+    messages.Add(new { role = role, content = msg.Content });
+}
+
+messages.Add(new { role = "user", content = newMessage });
+
+var requestBody = new
+{
+    model = "gpt-4o",
+    messages = messages,
+    temperature = 0.2,
+    max_tokens = 1500
+};
+
+using var request = new HttpRequestMessage(HttpMethod.Post,
+    "https://api.openai.com/v1/chat/completions");
+request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+request.Content = new StringContent(JsonSerializer.Serialize(requestBody),
+    Encoding.UTF8, "application/json");
+\end{lstlisting}
+
+A válaszfeldolgozás \texttt{JsonDocument}-tel navigál a
+\texttt{choices[0].message.content} útvonalon; sikertelen HTTP-státusz esetén a szolgáltatás a
+hibatörzset naplózza, majd általános kivételt dob, amelyet a kontroller fordít 500-as válaszra. A
+beszélgetés a szerveren \emph{nem perzisztálódik}: a \texttt{ChatRequest} és a
+\texttt{ChatMessage} tisztán átviteli objektum, adatbázistábla nem tartozik hozzájuk -- minden
+kérés önmagában hordozza a kontextusát. A kérés teljes életútját
+a~\ref{fig:chat-sequence}.~ábra mutatja.
+
+% TODO: C-01 szekvenciadiagram (figures/c-01-chat-sequence.pdf) — Chatbot → POST /Chat →
+%       OpenAiService → api.openai.com → reply; szerep-szanitálás kiemelve.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6cm][c]{0.9\textwidth}{\centering C-01: A chatbot-kérés feldolgozásának szekvenciadiagramja (elkészítendő)}}
+	\caption{A chatbot-kérés útja a widgettől az OpenAI API-ig és vissza}
+	\label{fig:chat-sequence}
+\end{figure}
+
+\section{A chatbot frontend-megvalósítása}
+\label{sec:chat-frontend}
+
+A \texttt{Chatbot} komponens lebegő gombként ül az elrendezés bal alsó sarkában, és kattintásra
+csevegőablakká nyílik. A beszélgetést egyszerű komponens-állapot tárolja: az üzenetlista egy
+asszisztensi üdvözlő üzenettel indul, a beküldött kérdés azonnal bekerül a listába, a
+betöltésjelző pedig a válasz megérkezéséig forog. A kérés a közös \texttt{apiClient} példányon
+megy ki, az előzménylistából a nyitó üdvözlést levágva (\texttt{history: chatHistory.slice(1)}),
+mert az nem a modelltől származik. Hiba esetén a widget általános hibaszöveget fűz a
+beszélgetésbe, így a felhasználói élmény nem törik meg. A válaszok \texttt{react-markdown}
+komponenssel renderelődnek, egyedi elemleképezéssel (címsorok, listák, kiemelések) -- a modell
+által adott strukturált válaszok így olvashatóan jelennek meg. Két ergonómiai részlet teszi
+teljessé: az üzenetlista minden változáskor az aljára gördül, a küldés pedig Enterrel is
+kiváltható, üres bevitelnél letiltva. A beszélgetés nem kerül sem \texttt{localStorage}-ba, sem
+szerverre: az oldal újratöltése új beszélgetést kezd.
+
+\section{Időjárás-integráció}
+\label{sec:weather}
+
+Az időjárás-oldal a vadászat tervezését segíti: városnév alapján mutatja az aktuális
+hőmérsékletet, hőérzetet, páratartalmat, a szöveges leírást (magyar nyelven) és a szélsebességet
+-- utóbbit a szélirányt jelző, a \texttt{wind\_deg} értékkel elforgatott nyíllal. A megvalósítás
+a többi funkciótól eltérő, tudatos architektúra-kompromisszum: a \texttt{weatherService} modul
+\emph{közvetlenül}, a backend megkerülésével hívja az OpenWeather „current weather” végpontját
+(\texttt{q}, \texttt{units=metric}, \texttt{lang=hu} paraméterekkel), saját axios-hívással, nem a
+közös \texttt{apiClient}-tel -- hiszen itt sem hitelesítési fejlécre, sem a backend 401-kezelésére
+nincs szükség. Az API-kulcsot a \texttt{VITE\_OPEN\_WEATHER\_API} környezeti változó adja. Az
+oldal állapotkezelése szándékosan egyszerű: város, betöltés, hiba és eredmény lokális
+állapotban, React Query nélkül -- egyszeri, gombnyomásra induló lekérdezésről lévén szó a
+gyorsítótárazás nem adna hozzáadott értéket.
+
+% TODO: SC-11 képernyőkép (figures/sc-11-weather.png) — találattal; OpenWeather-kulcs kell.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-11: Az időjárás-oldal találattal (elkészítendő)}}
+	\caption{Az időjárás-oldal egy lekérdezett város aktuális adataival}
+	\label{fig:weather-screen}
+\end{figure}
+
+\section{Biztonsági megfontolások és korlátok}
+\label{sec:chat-korlatok}
+
+A chatbot legfontosabb védelmi vonala a szerveroldali elhelyezés: az OpenAI-kulcs soha nem jut el
+a kliensig, a rendszerprompt nem módosítható kívülről, a szerep-fehérlista pedig a
+prompt-injekció alapvető vektorát zárja le. Ugyanakkor a végponton \emph{nincs autorizáció és
+nincs sebességkorlátozás}: anonim hívó is költséget generálhat a fizetős OpenAI-kvóta terhére --
+éles üzem előtt bejelentkezéshez kötés és kérésszám-korlát (rate limiting) szükséges. Az
+időjárás-integráció tükörképe ennek a kompromisszumnak: a kliensoldali hívás egyszerű és nem
+terheli a backendet, cserébe az OpenWeather-kulcs a böngészőbe kerül, azaz kiolvasható -- ingyenes
+kvótájú kulcsnál vállalható, éles környezetben backend-proxy javasolt. További apró, ismert
+hibák: hiányzó kulcs esetén a szolgáltatás csendben \texttt{null} értékkel tér vissza, így a
+felület hibajelzés nélkül marad üres, az időjárás-ikon pedig rögzített \texttt{http://} sémájú
+URL-ről töltődik, amelyet a böngésző HTTPS alatt vegyes tartalomként blokkolhat. E pontok a
+továbbfejlesztési irányok (\ref{chap:osszefoglalas}.~fejezet) listáját gazdagítják.

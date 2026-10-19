@@ -1,0 +1,286 @@
+% !TeX root = ../main.tex
+% 6. fejezet — Hirdetési piactér
+% Hivatkozott források: Backend/HUNting.API/Controllers/AdsController.cs, Services/AdService.cs,
+%   Services/AdQueryOptions.cs, Models/PagedResult.cs, Models/Ads/*, Data/HuntingContext.cs,
+%   Frontend/HUNting/src/services/adsApi.ts, pages/Ads/AdsListPage.tsx, AdCreatePage.tsx,
+%   AdEditPage.tsx, AdDetailPage.tsx, AdForm.tsx
+
+\chapter{Hirdetési piactér}
+\label{chap:hirdetesek}
+
+A hirdetési piactér a HUNting legnagyobb forgalmú, publikusan is elérhető funkcióterülete:
+vadászati eszközök, felszerelések és vendégvadász-meghívások adásvételét támogatja. A fejezet a
+funkciót a már ismertetett sablon szerint, az adatmodelltől a felhasználói felületig mutatja be,
+külön kitérve a szerveroldali lapozás-szűrés és a képfeltöltés megvalósítására.
+
+\section{A funkció célja és felhasználói működése}
+\label{sec:ads-cel}
+
+A piactér böngészése nem igényel bejelentkezést: a hirdetéslista kulcsszó szerint kereshető, és
+kategória, valamint minimum- és maximumár szerint szűrhető; a találatok laponként kilencesével,
+létrehozási idő szerint csökkenő sorrendben jelennek meg. A listaelemről a hirdetés részletező
+oldalára lehet továbblépni, amely a leírást, az árat, a helyszínt, a feltöltött képeket és a
+kapcsolatfelvételi adatokat mutatja. Bejelentkezett felhasználó új hirdetést adhat fel: az űrlapon
+cím, leírás, kategória, ár, helyszín és elérhetőségek adhatók meg, a képek pedig húzd-és-ejtsd
+módszerrel, vágólapról beillesztve vagy fájlböngészővel csatolhatók. A hirdetés tulajdonosa -- és
+az adminisztrátor -- a részletező oldalról szerkesztheti és törölheti a hirdetést, valamint
+egyenként távolíthatja el a képeket; bejelentkezett felhasználó a listaoldalon a „Saját
+hirdetéseim” kapcsolóval csak a maga hirdetéseire szűkítheti a találatokat.
+
+% TODO: SC-02 képernyőkép (figures/sc-02-ads-list.png) — aktív kategória- és árszűrővel.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-02: A hirdetéslista szűrőkkel és lapozóval (elkészítendő)}}
+	\caption{A hirdetési piactér listaoldala keresővel, kategória- és árszűrőkkel}
+	\label{fig:ads-list-screen}
+\end{figure}
+
+% TODO: SC-03 képernyőkép (figures/sc-03-ad-detail.png) — tulajdonosként, a kezelőgombokkal.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-03: A hirdetés részletező oldala (elkészítendő)}}
+	\caption{Hirdetés részletei képekkel, kapcsolati adatokkal és tulajdonosi műveletekkel}
+	\label{fig:ad-detail-screen}
+\end{figure}
+
+\section{Adatmodell}
+\label{sec:ads-adatmodell}
+
+A funkció négy entitásra épül (\texttt{Models/Ads/}). A központi \texttt{Ad} entitás tárolja a
+hirdetés címét, leírását, árát (\texttt{decimal?}), a helyszín szöveges megnevezését és opcionális
+koordinátáit, a kapcsolatfelvételi e-mail-címet és telefonszámot, az állapotkódot, valamint a
+létrehozás időbélyegét. A kategóriákat az \texttt{AdCategory} szótártábla írja le, amelynek neve
+egyedi indexszel védett; a kezdeti adatfeltöltés tizenkét kategóriát hoz létre (például
+„Fegyverek”, „Lőszerek”, „Vadkamera”). A hirdetés állapotát az \texttt{AdStatus} referenciatábla
+kódolja -- itt nem numerikus, hanem karakterláncos elsődleges kulcsot használ a rendszer
+(\texttt{ACTIVE}, \texttt{PENDING}, \texttt{SOLD}, \texttt{HIDDEN}) --, így az állapotkód
+önmagában is beszédes. A képeket az \texttt{AdImage} entitás kapcsolja a hirdetéshez: a tárolt
+útvonal mellett \texttt{SortOrder} rendezőszámot is tartalmaz, és a hirdetés törlésekor
+kaszkádolva törlődik.
+
+A tulajdonlás a modell legérdekesebb megszorítása. A hirdetés gazdája kétféle lehet --
+felhasználó (\texttt{OwnerUserId}) vagy társaság (\texttt{OwnerSocietyId}) --, és a
+\texttt{HuntingContext} egy adatbázisszintű ellenőrző megszorítással
+(\texttt{CK\_Ads\_SingleOwner}) garantálja, hogy a két idegen kulcs közül \emph{pontosan az egyik}
+legyen kitöltve. Ugyanezt az invariánst az üzleti réteg is ellenőrzi (lásd
+a~\ref{sec:ads-backend}.~alfejezetet), így a szabály megsértése már az adatbázis elérése előtt
+kiderül. Mindkét tulajdonosi idegen kulcs kaszkád törlésű: a felhasználó vagy a társaság
+törlésekor a hirdetései is törlődnek; a kategória- és státuszhivatkozás ezzel szemben
+\texttt{Restrict} viselkedésű, tehát használatban lévő szótárérték nem törölhető.
+
+\section{Backend-megvalósítás}
+\label{sec:ads-backend}
+
+A funkciót az \texttt{AdsController} és a mögötte álló \texttt{AdService} szolgáltatás valósítja
+meg; a kontroller kizárólag a HTTP-réteggel és a jogosultság-ellenőrzéssel foglalkozik, a
+lekérdezés-összeállítás és az adatműveletek a szolgáltatásban élnek. A végpontokat
+a~\ref{tab:ads-endpoints}.~táblázat foglalja össze.
+
+\begin{table}[htbp]
+	\centering
+	\caption{Az \texttt{AdsController} végpontjai}
+	\label{tab:ads-endpoints}
+	\begin{tabular}{|l|l|p{5.9cm}|}
+		\hline
+		\textbf{Végpont} & \textbf{Hozzáférés} & \textbf{Feladat} \\
+		\hline
+		GET \texttt{/api/Ads} & anonim & Lapozott, szűrhető hirdetéslista \\
+		\hline
+		GET \texttt{/api/Ads/categories} & anonim & Kategórialista \\
+		\hline
+		GET \texttt{/api/Ads/statuses} & anonim & Állapotlista \\
+		\hline
+		GET \texttt{/api/Ads/\{id\}} & anonim & Egy hirdetés részletei \\
+		\hline
+		POST \texttt{/api/Ads} & bejelentkezett & Hirdetés létrehozása \\
+		\hline
+		PUT \texttt{/api/Ads/\{id\}} & tulajdonos v. admin & Hirdetés módosítása \\
+		\hline
+		DELETE \texttt{/api/Ads/\{id\}} & tulajdonos v. admin & Hirdetés törlése \\
+		\hline
+		POST \texttt{/api/Ads/\{id\}/images} & tulajdonos v. admin & Kép feltöltése (max.\ 10~MiB) \\
+		\hline
+		DELETE \texttt{/api/Ads/\{id\}/images/\{imageId\}} & tulajdonos v. admin & Kép törlése \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\subsection{Lapozott és szűrt lekérdezés}
+
+A listázó végpont a lekérdezési paramétereket az \texttt{AdQueryOptions} osztályba köti
+(oldalszám, lapméret, keresőkifejezés, kategória, állapotkód, ár-intervallum, tulajdonos). A
+szolgáltatás a lapozási értékeket normalizálja -- egynél kisebb oldalszámból egy lesz, az 1 és 100
+közé nem eső lapméret helyett az alapértelmezett tizenkettő érvényesül --, majd a szűrőfeltételeket
+csak akkor fűzi a lekérdezéshez, ha az adott paraméter ténylegesen meg van adva
+(\ref{lst:ads-paged}.~kódrészlet). Így minden szűrés az adatbázisban, SQL-szinten fut le, a
+válasz pedig a \texttt{PagedResult<T>} rekordban a találatok mellett a teljes találatszámot és a
+lapozási adatokat is visszaadja -- a kliens ebből számítja az oldalszámot.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={Szerveroldali lapozás és feltételes szűrés az \texttt{AdService.GetPagedAsync} metódusban (kivonat)}, label={lst:ads-paged}]
+var page = options.Page < 1 ? 1 : options.Page;
+var take = options.Take is < 1 or > 100 ? 12 : options.Take;
+
+IQueryable<Ad> query = _context.Ads
+    .AsNoTracking()
+    .Include(a => a.Category)
+    .Include(a => a.Images)
+    .Include(a => a.Status);
+
+if (!string.IsNullOrWhiteSpace(options.Search))
+{
+    var term = options.Search.Trim();
+    query = query.Where(a =>
+        EF.Functions.Like(a.Title, $"%{term}%") ||
+        (a.Description != null && EF.Functions.Like(a.Description, $"%{term}%")));
+}
+
+if (options.MinPrice.HasValue)
+{
+    query = query.Where(a => a.Price >= options.MinPrice.Value);
+}
+
+var total = await query.CountAsync();
+
+var items = await query
+    .OrderByDescending(a => a.CreatedAt)
+    .Skip((page - 1) * take)
+    .Take(take)
+    .ToListAsync();
+
+return new PagedResult<Ad>(items, total, page, take);
+\end{lstlisting}
+
+A keresés az \texttt{EF.Functions.Like} függvénnyel fordul SQL \texttt{LIKE} kifejezésre, és a
+címre, valamint a leírásra egyaránt illeszkedik. A lekérdezés \texttt{AsNoTracking} módban fut,
+mivel az eredmény csak olvasásra szolgál, a kapcsolódó kategória-, kép-, állapot- és
+tulajdonos-adatokat pedig \texttt{Include} hívások töltik be egyetlen lekérdezésben.
+
+\subsection{Írási műveletek és tulajdonlás}
+
+Hirdetés létrehozásakor a kontroller a hívó szerepétől függően kezeli a tulajdonlást: nem
+adminisztrátor esetén a tulajdonos kényszerítetten maga a hívó (a kérésben esetleg megadott
+tulajdonosmezők felülíródnak), adminisztrátor viszont tetszőleges felhasználói vagy társasági
+tulajdonost adhat meg -- ha egyiket sem adja meg, a rendszer őt magát jelöli tulajdonosnak. Az
+\texttt{AdService} minden írási művelet előtt a „pontosan egy tulajdonos” invariánst is ellenőrzi,
+és megsértése esetén \texttt{ArgumentException} kivételt dob, amelyet a kontroller 400-as
+válaszra fordít. A módosítás és a törlés a~\ref{chap:felhasznalok}.~fejezetben bemutatott
+erőforrás-tulajdonos mintát követi (\ref{lst:owner-check}.~kódrészlet): a műveletet csak a
+tulajdonos vagy adminisztrátor végezheti el, és a tulajdonosmezők átírása adminisztrátori
+kiváltság.
+
+\subsection{Képfeltöltés}
+
+A képfeltöltő végpont többrészes (\texttt{multipart/form-data}) kérést fogad, amelynek méretét a
+\texttt{[RequestSizeLimit]} attribútum 10~MiB-ban korlátozza. A feldolgozás több lépcsős
+védelmet alkalmaz: üres fájl esetén azonnali hibával tér vissza, a fájlnév kiterjesztését
+kisbetűsítve fehérlistával veti össze (csak \texttt{.jpg}, \texttt{.jpeg}, \texttt{.png} és
+\texttt{.webp} engedélyezett), a lemezre pedig nem az eredeti fájlnéven, hanem újonnan generált
+GUID néven ír -- ezzel kizárva az útvonal-befecskendezést és a fájlnév-ütközést. A fájl a webes
+gyökér \texttt{uploads/ads} könyvtárába kerül (a könyvtárat a kontroller szükség esetén
+létrehozza), az adatbázisba csak a relatív URL íródik, a kiszolgálást pedig a statikus
+fájl-middleware végzi. Az \texttt{AdService.AddImageAsync} a rendezőszámot a meglévő képek
+maximuma alapján, folytatólagosan osztja ki. Kép törlésekor a végpont ellenőrzi, hogy a kép
+valóban az útvonalban megadott hirdetéshez tartozik-e, majd a lemezen tárolt fájlt és az
+adatbázisrekordot is eltávolítja.
+
+\section{Frontend-megvalósítás}
+\label{sec:ads-frontend}
+
+\subsection{Listaoldal és szűrés}
+
+Az \texttt{AdsListPage} a szűrőket (keresőmező, kategória-legördülő, ár-intervallum, „Saját
+hirdetéseim” kapcsoló) komponens-lokális állapotban tartja, a találatokat pedig a React Query
+kezeli. A lekérdezés kulcsa a teljes szűrőállapotot tartalmazza
+(\texttt{["ads", categoryId, search, minPrice, maxPrice, showMyAds, page]}), így bármely szűrő
+változása automatikusan új lekérdezést vált ki, a korábbi szűrőkombinációk eredménye pedig a
+gyorsítótárból azonnal visszatölthető. Egy effektus gondoskodik róla, hogy szűrőváltáskor a lapozó
+az első oldalra ugorjon. A „Saját hirdetéseim” kapcsoló a bejelentkezett felhasználó azonosítóját
+adja át \texttt{ownerUserId} paraméterként, vagyis a szűrés ilyenkor is szerveroldalon történik. A
+lapszámot a kliens a válasz \texttt{total} mezőjéből számítja, kilences lapmérettel.
+
+\subsection{Hirdetésfeladás és az űrlap}
+
+Az új hirdetés oldala (\texttt{AdCreatePage}) vendég látogatót a bejelentkezési oldalra irányít,
+az eredeti célútvonalat útvonalállapotban megőrizve. Az űrlapot a létrehozó és a szerkesztő oldal
+által közösen használt \texttt{AdForm} komponens adja: kontrollált beviteli mezőkkel dolgozik, a
+kategórialistát a gyorsítótárazott \texttt{["ad-categories"]} lekérdezésből tölti, az új képeket
+pedig memóriában gyűjti -- a fájlok háromféleképpen adhatók hozzá (fájlböngésző, húzd-és-ejtsd,
+vágólap-beillesztés), és csak \texttt{image/} MIME-típusú fájlokat fogad el. Az előnézetekhez a
+komponens objektum-URL-eket képez, amelyeket leszereléskor fel is szabadít. Szerkesztéskor a már
+feltöltött képek nem azonnal törlődnek, hanem eltávolításra jelölhetők, és csak az űrlap
+beküldésekor kerülnek ténylegesen törlésre.
+
+A beküldés folyamata kétfázisú, mert a backend a hirdetést és a képeket külön végpontokon
+kezeli: először a hirdetés jön létre, majd a kapott azonosítóval egyenként töltődnek fel a képek,
+végül a kliens érvényteleníti a hirdetéslista gyorsítótárát és a részletező oldalra navigál
+(\ref{lst:ads-create}.~kódrészlet).
+
+\begin{lstlisting}[caption={A hirdetésfeladás kétfázisú beküldése az \texttt{AdCreatePage} komponensben (kivonat)}, label={lst:ads-create}]
+const created = await mutation.mutateAsync(payload);
+
+if (newFiles.length > 0) {
+  setIsProcessingImages(true);
+  for (const file of newFiles) {
+    await adsApi.uploadImage(created.adId, file);
+  }
+}
+
+await queryClient.invalidateQueries({ queryKey: ["ads"] });
+await queryClient.invalidateQueries({ queryKey: ["ads", created.adId] });
+navigate(`/ads/${created.adId}`, { replace: true });
+\end{lstlisting}
+
+\subsection{Részletező és szerkesztő oldal}
+
+A részletező oldal (\texttt{AdDetailPage}) az útvonal-paraméterből kiolvasott azonosítóval, az
+\texttt{["ads", adId]} kulcson kérdezi le a hirdetést. A kezelőgombok megjelenítéséről a
+\texttt{canManage} feltétel dönt: a felhasználó adminisztrátor, vagy a hirdetés
+\texttt{ownerUserId} mezője egyezik az azonosítójával -- ez ugyanaz a szabály, amelyet a backend
+is kikényszerít, így a felület nem ígér olyan műveletet, amelyet a szerver elutasítana. A törlés
+natív megerősítő kérdés után fut, sikere a lista-gyorsítótár érvénytelenítésével és a listaoldalra
+navigálással zárul. Képtörléskor a kliens optimalizált frissítést alkalmaz: a részletező oldal
+gyorsítótárazott adatából azonnal kiszűri a törölt képet, és csak ezután érvényteleníti a
+listákat. A szerkesztő oldal (\texttt{AdEditPage}) ugyanazt az \texttt{AdForm} komponenst tölti
+fel a meglévő hirdetés adataival; beküldéskor a módosítás mellett az újonnan csatolt képeket
+feltölti, az eltávolításra jelölteket törli, majd szintén a részletező oldalra tér vissza.
+
+% TODO: SC-04 képernyőkép (figures/sc-04-ad-form.png) — képelőnézettel és drag&drop zónával.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-04: A hirdetésfeladó űrlap (elkészítendő)}}
+	\caption{A hirdetésfeladó űrlap képelőnézettel és húzd-és-ejtsd feltöltési zónával}
+	\label{fig:ad-form-screen}
+\end{figure}
+
+\section{Adatfolyam, biztonság és korlátok}
+\label{sec:ads-adatfolyam}
+
+A hirdetésfeladás teljes, képfeltöltéssel kombinált adatfolyamát
+a~\ref{fig:ad-create-sequence}.~ábra szemlélteti. A folyamat jól példázza a REST-erőforrások
+szétválasztásából adódó tervezési kompromisszumot: a hirdetés és a képek külön erőforrások, ezért
+a kliens felelőssége a műveletsor levezénylése. Előnye, hogy a képfeltöltés hibája nem veszíti el
+magát a hirdetést; hátránya, hogy a folyamat nem atomi -- ha a feltöltési ciklus félbeszakad, a
+hirdetés a képek egy részével marad meg.
+
+% TODO: F-01 szekvenciadiagram (figures/f-01-ad-create-sequence.pdf) — AdForm → POST /ads →
+%       AdService → SaveChanges → képenként POST /ads/{id}/images → wwwroot/uploads.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering F-01: A hirdetésfeladás szekvenciadiagramja képfeltöltéssel (elkészítendő)}}
+	\caption{A hirdetésfeladás és képfeltöltés szekvenciadiagramja}
+	\label{fig:ad-create-sequence}
+\end{figure}
+
+Biztonsági szempontból a funkció többrétegű védelmet valósít meg: a módosító végpontok
+tulajdonos- vagy adminisztrátor-ellenőrzéshez kötöttek; a tulajdonlás kettős invariánsát az
+üzleti réteg és adatbázis-megszorítás együtt őrzi; a képfeltöltést kiterjesztés-fehérlista,
+méretkorlát és generált fájlnév védi. A korlátok közé tartozik, hogy a kiterjesztés-ellenőrzés a
+fájlnéven alapul, a fájl tényleges tartalmát (mágikus bájtok) a rendszer nem vizsgálja; a
+feltöltött fájlok autentikáció nélkül, statikus tartalomként érhetők el, ami nyilvános piactérnél
+elfogadható, de érzékeny tartalomnál nem volna az. Megjegyzendő továbbá, hogy a végpontok magát az
+EF-entitást fogadják és adják vissza kérés- és válaszmodellként; ez kevesebb kódot igényel, mint a
+dedikált DTO-réteg, cserébe a módosító kérések a szükségesnél több mezőt tartalmazhatnak -- a
+kontroller ezért másolja át mezőnként, explicit listával a módosítható értékeket. Végül a
+kliensoldali állapotlista jelenleg rögzített \texttt{ACTIVE} alapértelmezettel dolgozik, és bár az
+állapotlekérdező végpont és kliensfüggvény létezik, a vizsgált oldalak nem használják -- az
+állapot alapú szűrés így a felületen kiaknázatlan lehetőség maradt.

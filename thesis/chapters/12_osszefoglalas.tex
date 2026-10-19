@@ -1,0 +1,76 @@
+% !TeX root = ../main.tex
+% 12. fejezet — Összefoglalás és továbbfejlesztési lehetőségek
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% A fejezetre a 7., 8., 9. és 10. fejezet hivatkozik (chap:osszefoglalas) — a címke KÖTELEZŐ.
+% Hivatkozott források: a dolgozat 5–11. fejezetei és a bennük dokumentált korlátok.
+
+\chapter{Összefoglalás és továbbfejlesztési lehetőségek}
+\label{chap:osszefoglalas}
+
+\section{Eredmények}
+\label{sec:ossz-eredmenyek}
+
+A dolgozat egy teljes, működő webalkalmazás -- a HUNting vadászati közösségi és hirdetési
+portál -- megtervezését és megvalósítását mutatta be, az adatbázistól a felhasználói felületig.
+A bevezetésben kitűzött hat funkcióterület mindegyike megvalósult, a gerincfejezetekben
+dokumentált terjedelemben. A \emph{felhasználókezelés} a kettős fióktípusra (egyéni vadász és
+vadásztársaság) épülő regisztrációt, JWT-alapú hitelesítést, két szintű -- szerepkör- és
+erőforrástulajdonos-alapú -- jogosultsági modellt és admin-felületet ad
+(\ref{chap:felhasznalok}.~fejezet). A \emph{hirdetési piactér} kategorizált, szűrhető és
+lapozott hirdetéslistát, képfeltöltéses hirdetéskezelést és kettős (felhasználói vagy
+társasági) tulajdonlást valósít meg (\ref{chap:hirdetesek}.~fejezet). A \emph{társasági modul}
+a tagfelvételi kérelmek teljes életciklusát, társaságon belüli szerepeket és tagoknak szóló
+bejegyzéseket kezel (\ref{chap:tarsasagok}.~fejezet). A \emph{vadásznapló} képmelléklettel
+rögzíti a személyes vadászati eseményeket (\ref{chap:naplo}.~fejezet). A \emph{térképes modul}
+Google Maps-alapú megjelenítéssel, személyes és társasági rétegeken kezel jelölőket és
+rajzolt területeket (\ref{chap:terkep}.~fejezet). Végül az \emph{AI-chatbot} szerveroldali
+OpenAI-integrációval, szerep-szanitálással ad vadászati asszisztenst, az
+\emph{időjárásoldal} pedig aktuális időjárási adatokat jelenít meg
+(\ref{chap:chatbot}.~fejezet).
+
+A megvalósítás mérnöki értékét a közös alapok adják: az egységes, 26 táblás, kifejezetten
+megtervezett törlési viselkedésekkel és megszorításokkal bíró adatmodell, az idempotens
+kezdeti adatfeltöltés, a következetes middleware-csővezeték és a kliensoldali közös
+HTTP-réteg (\ref{chap:alapok}.~fejezet). A kódbázishoz háromszintű tesztkészlet készült --
+124 backend-egységteszt, 17 komponenstesztfájl és 26 végponttól végpontig teszt --, amely a
+jogosultsági ágakat, a külső integrációk izolálását és a kritikus felhasználói utakat fedi le
+(\ref{chap:teszteles}.~fejezet). A dolgozat végig törekedett az őszinte minősítésre: minden
+funkciófejezet külön szakaszban rögzítette a megvalósítás korlátait, megkülönböztetve a
+működő, az előkészített és a hiányzó képességeket.
+
+\section{Továbbfejlesztési lehetőségek}
+\label{sec:ossz-tovabbfejlesztes}
+
+A funkciófejezetekben dokumentált korlátok egyben a továbbfejlesztés térképét is kirajzolják.
+A legfontosabb irányok a következők.
+
+\begin{itemize}
+	\item \emph{Hírfolyam befejezése:} a backend-oldalon előkészített hírmodul
+	      (\ref{chap:tarsasagok}.~fejezet) felhasználói felületének elkészítése, a hiányzó
+	      autorizáció pótlásával együtt -- ez a rendszer legégetőbb biztonsági adóssága.
+	\item \emph{Hitelesítés megerősítése:} frissítő token és tokenvisszavonás bevezetése, a
+	      jelszószabályzat szigorítása, a konfigurációs titkok (JWT-kulcs, API-kulcsok)
+	      titokkezelőbe szervezése.
+	\item \emph{Térképi funkciók kiteljesítése:} az adatmodell szintjén előkészített útvonalak
+	      (\texttt{MapPath}) végpontjainak és felületének elkészítése; a láthatósági kódok
+	      tényleges szűrési logikájának megvalósítása; szerkesztőfelület a meglévő
+	      PUT-végpontokhoz (\ref{chap:terkep}.~fejezet).
+	\item \emph{Felületi hiányok pótlása:} szerkesztő- és törlőműveletek a vadásznaplóban,
+	      lapozás a naplólistában (\ref{chap:naplo}.~fejezet), admin-felület a létrehozó és
+	      módosító végpontokhoz, valamint a felületi szövegek ékezeteinek rendezése.
+	\item \emph{Külső integrációk keményítése:} az anonim chatvégpont sebességkorlátozása és a
+	      kliensoldali OpenWeather-hívás backend-proxy mögé szervezése
+	      (\ref{chap:chatbot}.~fejezet).
+	\item \emph{Közösségi funkciók bővítése:} értesítések (például tagfelvételi döntésről),
+	      tagok közötti üzenetküldés, valamint hosszabb távon natív mobilalkalmazás.
+	\item \emph{Üzemeltetési érettség:} CI-futtatás a meglévő tesztkészletre, konténerizálás,
+	      környezetenkénti konfiguráció és telepítési folyamat; kódszinten a lusta
+	      oldalbetöltés bekapcsolása és a kliensoldali típusok generálása az
+	      OpenAPI-leírásból.
+\end{itemize}
+
+A felsorolás terjedelme nem a rendszer hiányosságát, hanem a választott megközelítés
+következményét tükrözi: a dolgozat egy szélesen integrált rendszert valósított meg hat
+funkcióterületen, teljes vertikumban, és minden területen pontosan dokumentálta, hol húzódik a
+megvalósítás határa. Az elkészült alap -- a közös adatmodell, a jogosultsági rendszer és a
+tesztkészlet -- úgy lett kialakítva, hogy ezek az irányok töréspont nélkül építhetők rá.

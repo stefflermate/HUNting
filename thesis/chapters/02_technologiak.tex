@@ -1,0 +1,165 @@
+% !TeX root = ../main.tex
+% 2. fejezet — Felhasznált technológiák
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% Hivatkozott források: Frontend/HUNting/package.json, tsconfig.app.json, vite.config.ts,
+%   src/lib/queryClient.ts, src/App.tsx, src/index.css,
+%   Backend/HUNting.API/HUNting.API.csproj, Program.cs, Data/HuntingContext.cs,
+%   appsettings.json, src/pages/Map/MapPage.tsx, Services/OpenAiService.cs (hivatkozás),
+%   src/services/weatherService.ts
+
+\chapter{Felhasznált technológiák}
+\label{chap:technologiak}
+
+Ez a fejezet a rendszerben ténylegesen használt technológiákat mutatja be, rétegek szerint
+haladva, minden választásnál megadva annak indokát is. A cél nem a technológiák általános
+ismertetése, hanem annak rögzítése, hogy az adott eszköz \emph{ebben a projektben} milyen
+szerepet tölt be; a funkcióspecifikus felhasználási részletek a gerincfejezetekben
+(\ref{chap:felhasznalok}--\ref{chap:chatbot}.~fejezet) találhatók. A verziószámok a
+csomagdefiníciókból (\texttt{package.json}, \texttt{HUNting.API.csproj}) ellenőrzött értékek;
+a teljes technológiai palettát a~\ref{fig:stack}.~ábra tekinti át.
+
+% TODO: T-01 ábra (figures/t-01-stack.pdf) — rétegzett stack-ábra: React/TS/Vite/Tailwind/
+% React Query/Router/axios | ASP.NET Core 8/EF Core/Identity/JWT/Swagger | MSSQL | külső API-k.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering T-01: A technológiai stack áttekintése
+	(elkészítendő)}}
+	\caption{A HUNting technológiai rétegei}
+	\label{fig:stack}
+\end{figure}
+
+\section{A frontend technológiái}
+\label{sec:tech-frontend}
+
+\subsection{React és TypeScript}
+
+A felhasználói felület a React könyvtár 18-as főverzióján alapul~\cite{reactdocs}. A React
+deklaratív modellje -- a felület a mindenkori állapot függvénye, a DOM-frissítéseket a könyvtár
+vezérli -- jól illeszkedik egy adatvezérelt alkalmazáshoz, ahol ugyanazok az adatok (hirdetések,
+tagságok, térképi objektumok) több nézetben, több állapotban jelennek meg. A kódbázis kizárólag
+függvénykomponenseket és hookokat használ: a lokális állapotot a \texttt{useState}, a
+mellékhatásokat a \texttt{useEffect}, a származtatott értékeket a \texttt{useMemo} kezeli, az
+alkalmazásszintű hitelesítési állapotot pedig egy saját kontextus és a hozzá tartozó
+\texttt{useAuth} hook szolgáltatja (\ref{chap:felhasznalok}.~fejezet).
+
+A teljes kliensoldali kódbázis TypeScript nyelven készült~\cite{tshandbook}, szigorú
+(\texttt{strict}) fordítóbeállításokkal, bekapcsolt holtkód-ellenőrzésekkel
+(\texttt{noUnusedLocals}, \texttt{noUnusedParameters}) -- ezt a \texttt{tsconfig.app.json}
+rögzíti. A statikus típusosság a projektben elsősorban a szerver--kliens határfelület
+dokumentálását szolgálja: a backend válaszformátumait a \texttt{src/types} modul interfészei
+tükrözik, így az API-t érintő eltérések már fordítási időben kiderülnek. Mivel a két oldal
+típusai között nincs generált kapcsolat, az összhang fenntartása fegyelmet igényel; ez a
+választott egyszerűség ára.
+
+\subsection{Vite}
+
+A fejlesztői kiszolgálót és a produkciós csomagolást a Vite adja~\cite{vitedocs}. Fejlesztés
+közben a Vite natív ES-modulokat szolgál ki, így az indulás és a módosítás utáni frissítés
+(hot module replacement) másodperc alatti; a produkciós build Rollup-alapú. A konfiguráció
+(\texttt{vite.config.ts}) szándékosan minimális: a React-bővítmény és a Tailwind-bővítmény
+mellett egyetlen útvonal-aliast definiál (\texttt{@} $\rightarrow$ \texttt{./src}), amely a
+mély relatív importútvonalakat váltja ki, és amelyet a tesztkonfiguráció is örököl
+(\ref{chap:teszteles}.~fejezet). A Vite \texttt{import.meta.env} mechanizmusa kezeli a
+környezeti változókat is -- így jut el a kliensbe az API-alapcím és a külső szolgáltatások két
+kulcsa (\ref{sec:teszt-uzemeltetes}.~alfejezet).
+
+\subsection{TanStack Query (React Query)}
+
+A szerverállapot kezelésére a rendszer a TanStack Query könyvtárat
+használja~\cite{tanstackquery}. A könyvtár a szerverről származó adatokat deklaratívan,
+kulcsokkal azonosított lekérdezésekként kezeli: gondoskodik a gyorsítótárazásról, az
+állapotjelzésekről (betöltés, hiba) és az érvénytelenítés utáni újratöltésről. Ez a projektben
+azt jelenti, hogy az oldalkomponensek nem írnak kézi adatbetöltő logikát: a \texttt{useQuery}
+hook a megfelelő API-modult hívja, a mutációk pedig sikeres írás után az érintett kulcsokat
+érvénytelenítik, mire a felület automatikusan frissül. A globális alapértelmezéseket -- egyperces
+frissességi ablak, kikapcsolt fókusz-újratöltés és újrapróbálkozás -- a megosztott
+\texttt{queryClient} példány rögzíti (\ref{sec:alapok-frontend}.~alfejezet). A kliensoldali
+(nem szerverről származó) állapot ezzel szemben szándékosan egyszerű eszközökkel,
+komponensállapottal és kontextussal van kezelve; külön állapotkezelő könyvtárra (Redux,
+Zustand) a projekt méreténél fogva nem volt szükség.
+
+\subsection{React Router, axios és a megjelenési réteg}
+
+A kliensoldali útvonalkezelést a React Router 6-os verziója végzi~\cite{reactrouter}
+(\texttt{createBrowserRouter}, beágyazott elrendezés-útvonalak, dinamikus szegmensek -- a teljes
+útvonaltáblát a~\ref{sec:alapok-frontend}.~alfejezet közli). A HTTP-kommunikáció az axios
+könyvtárra épül~\cite{axiosdocs}, amelynek elfogó- (interceptor-) mechanizmusa teszi lehetővé a
+hitelesítés és a hibakezelés egyetlen pontra koncentrálását.
+
+A megjelenés a Tailwind CSS 4-es verziójára épül~\cite{tailwinddocs}: a stílusok
+segédosztályokként, közvetlenül a JSX-ben íródnak, a témát (színek, betűtípusok) pedig a
+4-es verzió új, CSS-alapú \texttt{@theme} direktívája definiálja
+(\ref{sec:alapok-frontend}.~alfejezet). A segédosztály-alapú megközelítést kiegészíti néhány
+kis könyvtár: a \texttt{class-variance-authority} és a \texttt{tailwind-merge} a
+variánsalapú UI-primitívek (gombok) megvalósítását segíti, a Radix UI \texttt{Slot}
+komponense a gombok polimorf viselkedését adja, az ikonokat a \texttt{lucide-react} készlet
+szolgáltatja, a chatbot válaszainak formázott megjelenítését pedig a \texttt{react-markdown}
+végzi.
+
+\section{A backend technológiái}
+\label{sec:tech-backend}
+
+\subsection{ASP.NET Core 8 Web API}
+
+A szerveroldal az ASP.NET Core 8 keretrendszerre épül~\cite{aspnetcoredocs}, kizárólag Web
+API-ként (nézetgenerálás nélkül). A keretrendszer három tulajdonsága bizonyult meghatározónak a
+projektben. Az első a beépített \emph{függőséginjektálás}: a szolgáltatások életciklusát a
+konténer kezeli, a kontrollerek és szolgáltatások konstruktoron át kapják függőségeiket, ami a
+tesztelhetőség alapja (\ref{chap:teszteles}.~fejezet). A második a \emph{middleware-csővezeték},
+amelyben a keresztvágó feladatok (CORS, hitelesítés, jogosultságkezelés, statikus fájlok)
+deklaráltan, jól meghatározott sorrendben futnak (\ref{sec:alapok-backend}.~alfejezet). A
+harmadik az \texttt{[ApiController]} konvenciókészlet: automatikus modellvalidáció,
+egységes hibaválaszok és attribútumalapú útvonalillesztés. A hitelesítési igényeket az
+ASP.NET Core Identity és a JWT-bearer middleware fedi le~\cite{identitydocs, rfc7519};
+a fejlesztést a Swashbuckle által generált OpenAPI-leírás és Swagger-felület támogatja.
+
+A megvalósítás a C\# nyelv modern eszközeire támaszkodik: a teljes adatelérés és minden
+kontrollerakció aszinkron (\texttt{async}/\texttt{await}), ami a szálkészlet hatékony
+kihasználását adja I/O-intenzív terhelés alatt; a bekapcsolt \emph{nullable referenciatípusok}
+fordítási időben kényszerítik ki a hiányzó értékek kezelését; a rekordtípusok a kis,
+változtathatatlan adathordozók (seed-definíciók, DTO-k) tömör leírását teszik lehetővé.
+
+\subsection{Entity Framework Core}
+
+Az adatelérést az Entity Framework Core 8 objektum-relációs leképező
+végzi~\cite{efcoredocs}, Code First megközelítésben: a séma forrása a C\# entitásmodell, az
+evolúciót migrációk írják le, a lekérdezések pedig LINQ-kifejezésekként készülnek, amelyeket a
+szolgáltató SQL-re fordít. A projekt az EF Core képességeinek széles sávját használja: a
+Fluent API-s modellkonfigurációt (összetett kulcsok, alternatív kulcsok, törlési viselkedések,
+ellenőrző megszorítások -- \ref{sec:alapok-adat}.~alfejezet), a változáskövetést az írási
+műveleteknél, az \texttt{AsNoTracking} csak olvasó lekérdezéseket a listázásoknál, az
+\texttt{Include}-alapú betöltést a kapcsolt adatokhoz, valamint a kiszolgálóoldalra forduló
+lapozást és szűrést (\ref{chap:hirdetesek}.~fejezet). Az ORM választása a kézi SQL-lel szemben
+a típusbiztonságot és a sémával együtt verziózott migrációkat hozta; az absztrakció árát --
+a generált lekérdezések feletti részleges kontrollt -- a projekt adatmennyiségei mellett nem
+ellensúlyozza kézi optimalizálási igény.
+
+\section{Microsoft SQL Server}
+\label{sec:tech-mssql}
+
+Az adatok a Microsoft SQL Server relációs adatbázis-kezelőben
+tárolódnak~\cite{sqlserverdocs}. A választást a .NET-ökoszisztémával való szoros integráció
+(első osztályú EF Core-szolgáltató) és a fejlesztést egyszerűsítő LocalDB-kiadás indokolta: a
+LocalDB igény szerint induló, telepítést alig igénylő folyamatként futtatja a teljes értékű
+SQL Server-motort, így a fejlesztői gépen nincs szükség adatbázis-kiszolgáló üzemeltetésére. A
+\emph{VadászNet} nevű adatbázist a kapcsolati karakterlánc jelöli ki; a sémát és a kezdeti
+tartalmat a backend induláskor, migrációkkal és adatfeltöltéssel maga állítja elő
+(\ref{sec:alapok-adat}.~alfejezet), így az adatbázis a verziókezelt kódból bármikor
+reprodukálható. A rendszer kihasznál néhány kiszolgálóoldali képességet is: az időbélyegek
+\texttt{sysdatetime()} alapértékét, az egyedi indexeket és az ellenőrző megszorításokat.
+
+\section{Külső szolgáltatások}
+\label{sec:tech-kulso}
+
+A rendszer három külső szolgáltatást integrál, kétféle mintával. A \emph{Google Maps JavaScript
+API}~\cite{gmapsdocs} a térképes funkciók alapja: a kliens a \texttt{@react-google-maps/api}
+csomag React-komponensein keresztül jeleníti meg a térképet, a jelölőket és a rajzolóeszközt;
+a betöltés kliensoldali API-kulcshoz kötött (\ref{chap:terkep}.~fejezet). Az \emph{OpenAI Chat
+Completions API}~\cite{openaidocs} a vadászati asszisztens nyelvi modelljét (gpt-4o)
+szolgáltatja; ezt kizárólag a backend hívja, szerveroldali kulccsal, saját végpont mögött
+(\ref{chap:chatbot}.~fejezet). Az \emph{OpenWeather API}~\cite{openweatherdocs} aktuális
+időjárási adatokat ad településnév alapján; ezt -- a másik két szolgáltatástól eltérően -- a
+kliens közvetlenül hívja, ami egyszerűbb megvalósítás, de a kulcs kitettségével jár
+(\ref{chap:chatbot}.~fejezet). A kétféle integrációs minta (szerveroldali proxy, illetve
+közvetlen klienshívás) összevetése a~\ref{sec:arch-attekintes}.~alfejezetben, architekturális
+szinten is megjelenik.

@@ -1,0 +1,191 @@
+% !TeX root = ../main.tex
+% 11. fejezet — Tesztelés és üzemeltetés
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% Hivatkozott források: Backend/HUNting.API.Tests/* (HUNting.API.Tests.csproj,
+%   Controllers/*Tests.cs, Services/OpenAiServiceTests.cs),
+%   Frontend/HUNting/vitest.config.ts, src/setupTests.ts, src/**/*.test.tsx,
+%   playwright.config.ts, e2e/*.spec.ts, e2e/helpers.ts,
+%   Backend/HUNting.API/Properties/launchSettings.json, appsettings*.json, HUNting.API.csproj
+
+\chapter{Tesztelés és üzemeltetés}
+\label{chap:teszteles}
+
+A rendszerhez háromszintű automatizált tesztkészlet tartozik, amely a tesztpiramis klasszikus
+elrendezését követi (\ref{fig:tesztpiramis}.~ábra): az alapot 124 backend-egységteszt adja, a
+középső szintet 17 kliensoldali komponenstesztfájl, a csúcsot pedig 26 végponttól végpontig
+(end-to-end, E2E) tartó Playwright-teszt. A fejezet a három szint stratégiáját és jellegzetes
+mintáit mutatja be, majd a helyi futtatás és konfiguráció gyakorlati kérdéseit, végül az
+üzemeltetés és a tesztelés ismert korlátait összegzi. Fontos módszertani megjegyzés: a fejezet
+a tesztek \emph{felépítését} dokumentálja a forráskód alapján; futási eredményeket
+(sikerességi arányt, futásidőt) nem közöl.
+
+% TODO: Q-01 ábra (figures/q-01-tesztpiramis.pdf) — piramis: 124 xUnit / 17 Vitest-tesztfájl /
+% 26 Playwright E2E-teszt.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.7\textwidth}{\centering Q-01: A HUNting tesztpiramisa
+	(elkészítendő)}}
+	\caption{A tesztkészlet megoszlása a tesztpiramis szintjei szerint}
+	\label{fig:tesztpiramis}
+\end{figure}
+
+\section{Backend-egységtesztek}
+\label{sec:teszt-backend}
+
+A backend-teszteket az xUnit keretrendszer futtatja~\cite{xunitdocs}, a függőségek
+helyettesítését a Moq könyvtár végzi; az adatelérés izolálására a tesztkészlet az EF Core
+InMemory szolgáltatóját és a MockQueryable kiegészítőt használja. A 124 teszt kilenc
+tesztosztályban oszlik el: a nyolc kontrollernek egy-egy osztály felel meg (a legnagyobbak a
+társasági, a térképi és a hirdetési kontroller tesztjei, 25, 24, illetve 23 esettel), a
+kilencedik az \texttt{OpenAiService} szolgáltatást fedi le.
+
+A tesztek a lefedett komponens függőségi szerkezetéhez igazodva három izolációs stratégiát
+alkalmaznak. Ahol a kontroller szolgáltatásinterfészre támaszkodik (hirdetések, térkép, chat),
+ott a teszt az interfészt mockolja (\texttt{Mock<IAdService>},~stb.), és kizárólag a
+kontroller HTTP-szintű viselkedését -- státuszkódokat, jogosultsági ágakat -- ellenőrzi. Ahol a
+kontroller közvetlenül az adatbázis-kontextust használja (hitelesítés, hírek, társaságok,
+vadásznapló), ott a teszt EF Core InMemory adatbázist épít, és a teljes adatutat lefedi. A
+felhasználó-adminisztrációs tesztek a MockQueryable segítségével az Identity
+\texttt{UserManager} lekérdezhető felületét helyettesítik. Mindhárom stratégiában közös a
+hitelesített hívó szimulálása: a tesztek kézzel összeállított \texttt{ClaimsPrincipal}
+objektumot (felhasználó-azonosító és szerep claimekkel) helyeznek a kontroller
+\texttt{HttpContext}-jébe, így a jogosultsági ágak -- tulajdonos, idegen felhasználó,
+adminisztrátor -- külön-külön tesztelhetők.
+
+Külön említést érdemel a külső HTTP-függőség tesztelése. Az \texttt{OpenAiService} típusos
+\texttt{HttpClient}-tel dolgozik, ezért a tesztek nem a klienst, hanem az az alatt ülő
+\texttt{HttpMessageHandler} absztrakt osztályt mockolják
+(\ref{lst:httphandler-mock}.~kódrészlet): így a szolgáltatás valódi \texttt{HttpClient}-tel fut,
+miközben a hálózati hívás helyett előre összeállított válasz érkezik, a kimenő kérés pedig
+elfogható és vizsgálható.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={A \texttt{HttpMessageHandler} mockolása az \texttt{OpenAiServiceTests}-ben (kivonat)}, label={lst:httphandler-mock}]
+var handlerMock = new Mock<HttpMessageHandler>();
+handlerMock.Protected()
+    .Setup<Task<HttpResponseMessage>>(
+        "SendAsync",
+        ItExpr.IsAny<HttpRequestMessage>(),
+        ItExpr.IsAny<CancellationToken>())
+    .Callback<HttpRequestMessage, CancellationToken>((req, _) =>
+    {
+        captureRequest?.Invoke(req);
+        // a keres torzse meg a dispose elott kerul kiolvasasra
+    })
+    .ReturnsAsync(response);
+
+return new OpenAiService(new HttpClient(handlerMock.Object),
+                         configuration,
+                         NullLogger<OpenAiService>.Instance);
+\end{lstlisting}
+
+Erre a mintára épül a tesztkészlet egyik legértékesebb esete: a kérésnapló
+szerep-szanitálásának ellenőrzése. A teszt \texttt{"hacker"} szerepű üzenetet csempész az
+előzménylistába, majd az elfogott kéréstörzs JSON-jából bizonyítja, hogy a szolgáltatás azt
+\texttt{"user"} szerepre írta át -- vagyis a kliens nem tud rendszerszintű utasítást
+befecskendezni az OpenAI-kérésbe (\ref{chap:chatbot}.~fejezet).
+
+\section{Frontend-komponenstesztek}
+\label{sec:teszt-frontend}
+
+A kliensoldali teszteket a Vitest futtatja~\cite{vitestdocs}, a komponensek viselkedésalapú
+vizsgálatát a Testing Library végzi~\cite{testinglibrary}, a böngészőkörnyezetet pedig a
+könnyűsúlyú happy-dom szimulálja; a konfiguráció (\texttt{vitest.config.ts}) a Vite
+beállításaiból származik, így az útvonal-aliasok a tesztekben is működnek. A 17 tesztfájl a
+komponensfa minden szintjét érinti: az alkalmazásgyökértől (\texttt{App.test.tsx}) az
+elrendezéselemeken és UI-primitíveken át az oldalkomponensekig, amelyek a készlet zömét adják
+(hitelesítési, hirdetési, társasági, térképi, napló-, időjárás- és profiloldalak).
+
+A tesztek közös mintája a határfelületek modulszintű mockolása: a \texttt{vi.mock} hívás az
+API-szolgáltatásmodulokat (például \texttt{adsApi}) és a \texttt{useAuth} hookot helyettesíti,
+így a komponens valódi hálózati hívás és valódi hitelesítési állapot nélkül, előre definiált
+adatokkal renderelhető. Minden teszt friss \texttt{QueryClient} példányt kap kikapcsolt
+újrapróbálkozással, a renderelés pedig a valódi provider-fát (QueryClientProvider, Router)
+reprodukálja -- a tesztek tehát nem implementációs részleteket, hanem a felhasználó által
+látható viselkedést (megjelenő szövegeket, gombokra adott reakciókat) ellenőrzik. A térképoldal
+tesztje a Google Maps betöltését is mockolja (\texttt{useLoadScript}), így API-kulcs nélkül is
+futtatható.
+
+\section{Végponttól végpontig tesztek}
+\label{sec:teszt-e2e}
+
+A legfelső szintet a Playwright-tesztek adják~\cite{playwrightdocs}: hét tesztfájl (smoke,
+hitelesítés, hirdetések, társaságok, vadásznapló, chatbot, admin) összesen 26 tesztesete
+valódi böngészőben (Chromium), a teljes, integrált rendszer -- frontend, backend és adatbázis
+-- ellen fut. A konfiguráció kulcseleme a \texttt{webServer} blokk
+(\ref{lst:webserver}.~kódrészlet): a tesztfuttató maga indítja el a backendet és a frontendet,
+ha még nem futnak, így a készlet egyetlen paranccsal, külön előkészítés nélkül futtatható.
+
+\begin{lstlisting}[caption={A Playwright \texttt{webServer} konfigurációja (kivonat)}, label={lst:webserver}]
+webServer: [
+  {
+    command: "dotnet run --project ../../Backend/HUNting.API" +
+             " --launch-profile http",
+    url: "http://localhost:5137/api/ads",
+    reuseExistingServer: true,
+    timeout: 180_000,
+  },
+  {
+    command: "npm run dev -- --port 5173 --strictPort",
+    url: "http://localhost:5173",
+    reuseExistingServer: true,
+    env: {
+      // az apiClient.ts dev fallbackje nem a valos backend port
+      VITE_API_BASE_URL: "https://localhost:7003/api",
+    },
+  },
+],
+\end{lstlisting}
+
+A konfiguráció több, a rendszer sajátosságaiból fakadó döntést rögzít. A tesztek közös
+adatbázison dolgoznak, ezért a párhuzamosság kikapcsolt (\texttt{workers:~1}), a futás
+szekvenciális. A backend önaláírt fejlesztői tanúsítványa miatt a HTTPS-hibák elfogadottak
+(\texttt{ignoreHTTPSErrors}). A frontend indításakor a konfiguráció a
+\texttt{VITE\_API\_BASE\_URL} változót a backend tényleges 7003-as portjára állítja, ezzel
+megkerülve az \texttt{apiClient} téves fejlesztői alapértelmezését
+(\ref{sec:alapok-frontend}.~alfejezet).
+
+A tesztadat-kezelés kétféle fiókra épül. A csak olvasó forgatókönyvek a kezdeti adatfeltöltés
+ismert fiókjait (adminisztrátor, seedelt vadász) használják; a bejelentkezés nem a felületen,
+hanem API-híváson át történik, és a kapott tokent a segédmodul a frontend
+\texttt{localStorage}-kulcsaiba injektálja -- így a tesztek gyorsabbak, és nem függenek a
+bejelentkező űrlaptól. Az állapotot módosító, csak egyszer végrehajtható forgatókönyvekhez
+(például első tagfelvételi kérelem) a segédmodul minden futásban friss, időbélyeg-alapú egyedi
+e-mail-címmel regisztrált fiókot hoz létre, ezzel biztosítva az ismételhetőséget. A térképoldal
+E2E-tesztje tudatosan hiányzik: a Google Maps betöltése API-kulcshoz kötött
+(\ref{chap:terkep}.~fejezet).
+
+\section{Helyi futtatás és konfiguráció}
+\label{sec:teszt-uzemeltetes}
+
+A rendszer éles üzemeltetésre nincs felkészítve; a fejlesztői és demonstrációs futtatás
+lépései és feltételei a következők. A backend a \texttt{dotnet run} paranccsal indul, a
+fejlesztői profil szerint a \texttt{https://localhost:7003} és a \texttt{http://localhost:5137}
+címeken (\texttt{launchSettings.json}); induláskor automatikusan érvényesíti a migrációkat és
+lefuttatja az adatfeltöltést (\ref{sec:alapok-adat}.~alfejezet), fejlesztői módban pedig a
+Swagger-felület is elérhető. Az adatbázishoz SQL Server LocalDB szükséges; a HTTPS-hez a .NET
+fejlesztői tanúsítványa (\texttt{dotnet dev-certs https --trust}). A frontend a Vite fejlesztői
+kiszolgálóján, az 5173-as porton fut (\texttt{npm run dev}); ezt a származási helyet engedélyezi
+a backend CORS-házirendje.
+
+A külső szolgáltatásokhoz három kulcs szükséges, három különböző helyen: az OpenAI-kulcs a
+backend konfigurációjában (\texttt{OpenAI:ApiKey} -- fejlesztői gépen a user secrets tárolóban
+vagy az \texttt{appsettings.Development.json}-ban), a Google Maps- és az OpenWeather-kulcs a
+frontend környezeti változóiban (\texttt{VITE\_GOOGLE\_MAPS\_API\_KEY}, illetve
+\texttt{VITE\_OPEN\_WEATHER\_API}). Kulcs hiányában a rendszer többi része működőképes marad:
+a chatbot hibaüzenetet ad, a térképoldal betöltési hibát jelez, az időjárásoldal üres marad.
+
+\section{Ismert korlátok}
+\label{sec:teszt-korlatok}
+
+A tesztelés és az üzemeltetés őszinte állapotfelmérése a következő pontokat rögzíti.
+Folyamatos integrációs (CI) futtatókörnyezet nincs: a tesztek kézi indításúak, és a dolgozat --
+a fenti módszertani megjegyzésnek megfelelően -- futási eredményeket nem dokumentál.
+A teszt- és a fő projekt célkeretrendszere eltér (a tesztprojekt .NET~9-re, az API .NET~8-ra
+fordul), ami a tesztek futtathatóságát nem akadályozza, de egységesítése indokolt. Éles
+telepítési folyamat, konténerizáció és környezetenkénti konfigurációkezelés nem készült; az
+\texttt{appsettings.json}-ban fejlesztői helykitöltő JWT-kulcs szerepel. A biztonsági
+adósságok~\cite{owasp2021} közül kiemelendő a hírvégpontok hiányzó autorizációja
+(\ref{chap:tarsasagok}.~fejezet), a tokenvisszavonás és a frissítő token hiánya
+(\ref{chap:felhasznalok}.~fejezet), valamint az anonim chatvégpont és a kliensoldali
+API-kulcsok kitettsége (\ref{chap:chatbot}.~fejezet). Ezek a pontok a továbbfejlesztési
+irányok között (\ref{chap:osszefoglalas}.~fejezet) térnek vissza.

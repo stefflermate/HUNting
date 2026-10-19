@@ -1,0 +1,558 @@
+% !TeX root = ../main.tex
+% 4. fejezet — Közös rendszeralapok
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% Hivatkozott források: Backend/HUNting.API/Program.cs, Data/HuntingContext.cs, Data/SeedData.cs,
+%   Configuration/JwtOptions.cs, Services/GenericRepository.cs, IGenericRepository.cs,
+%   Services/AdService.cs, SocietyService.cs, Controllers/* (végponttábla, feltöltési minta),
+%   Migrations/*, appsettings.json, Properties/launchSettings.json,
+%   Frontend/HUNting/src/main.tsx, App.tsx, routes/appRouter.tsx, layouts/AppLayout.tsx,
+%   AuthLayout.tsx, lib/apiClient.ts, queryClient.ts, authStorage.ts, context/AuthContext.tsx,
+%   components/layout/AppHeader.tsx, index.css
+
+\chapter{Közös rendszeralapok}
+\label{chap:alapok}
+
+A HUNting funkciói -- a felhasználókezeléstől a térképes modulig -- közös infrastruktúrára
+épülnek: ugyanazt az adatbázis-kontextust, ugyanazt a hitelesítési middleware-t és ugyanazt a
+kliensoldali HTTP-réteget használják. Ez a fejezet ezt a funkciófüggetlen alapréteget mutatja be
+egyszer, összefüggően, hogy a dolgozat gerincét adó
+\ref{chap:felhasznalok}--\ref{chap:chatbot}.~funkciófejezetek ismétlés nélkül, kereszthivatkozással
+építhessenek rá. A tárgyalás a rendszer rétegeit alulról felfelé követi: először az adattárolás
+alapjait (adatbázis-kontextus, migrációk, kezdeti adatfeltöltés), majd a backend közös elemeit
+(alkalmazás-összeállítás, rétegzés, JWT-infrastruktúra, visszatérő megvalósítási minták), végül a
+frontend vázát (provider-fa, útvonalkezelés, API-kommunikáció, megjelenés) ismerteti.
+
+\section{Adattárolási alapok}
+\label{sec:alapok-adat}
+
+\subsection{A \texttt{HuntingContext} és az adatmodell}
+
+Az adatelérés az Entity Framework Core \emph{Code First} megközelítésére épül: az adatbázisséma
+egyetlen hiteles forrása a C\# entitásmodell, amelyből a séma migrációkkal áll elő. A fejlesztői
+környezetben az adatbázis egy \emph{VadászNet} nevű SQL Server LocalDB-példány, amelyet a
+konfiguráció \texttt{DefaultConnection} kapcsolati karakterlánca jelöl ki.
+
+A rendszer egyetlen adatbázis-kontextusa a \texttt{HuntingContext}
+(\texttt{Data/HuntingContext.cs}), amely nem a sima \texttt{DbContext}, hanem az
+\texttt{IdentityDbContext<ApplicationUser, IdentityRole<int>, int>} osztályból származik: így az
+ASP.NET Core Identity felhasználó- és szereptáblái ugyanabban a sémában élnek, mint az üzleti
+entitások, a teljes modell pedig egységesen egész számú elsődleges kulcsokat használ. A kontextus
+húsz \texttt{DbSet} tulajdonságot tesz közzé, amelyek tartományok szerint csoportosíthatók:
+
+\begin{itemize}[nosep]
+	\item \emph{Felhasználók:} \texttt{Users} (az Identity alaptábláját fedi le);
+	\item \emph{Társaságok:} \texttt{Societies}, \texttt{SocietyRoles}, \texttt{SocietyMembers},
+	      \texttt{SocietyMembershipRequests}, \texttt{SocietyPosts};
+	\item \emph{Hirdetések:} \texttt{Ads}, \texttt{AdCategories}, \texttt{AdImages},
+	      \texttt{AdStatuses};
+	\item \emph{Hírek:} \texttt{NewsFeed}, \texttt{NewsVisibility};
+	\item \emph{Vadásznapló:} \texttt{HuntingLogs};
+	\item \emph{Térkép:} \texttt{MapVisibilities}, \texttt{MapIconTypes}, \texttt{MapMarkers},
+	      \texttt{MapPolygons}, \texttt{MapPolygonPoints}, \texttt{MapPaths},
+	      \texttt{MapPathPoints}.
+\end{itemize}
+
+Ezekhez az Identity további hat infrastruktúra-táblája (szerepek, szerep-hozzárendelések,
+claimek, külső bejelentkezések, tokenek) társul, így az adatbázis összesen 26 táblából áll. Az
+Identity alapértelmezett \texttt{AspNet*} előtagú táblaneveit a kontextus
+\texttt{OnModelCreating} metódusa beszédesebb nevekre (\texttt{Users}, \texttt{Roles},
+\texttt{UserRoles}, \texttt{UserClaims}, \texttt{UserLogins}, \texttt{RoleClaims},
+\texttt{UserTokens}) képezi le.
+
+A modellkonfiguráció a Fluent API-ra és az entitásokon elhelyezett DataAnnotations
+attribútumokra épül; a visszatérő megoldások a következők.
+A státusz- és láthatóságjellegű \emph{kódtáblák} (\texttt{AdStatus}, \texttt{NewsVisibility},
+\texttt{MapVisibility}) karakterlánc-kódokkal (például \texttt{ACTIVE}, \texttt{PUBLIC},
+\texttt{MEMBERS}) kapcsolódnak a hivatkozó entitásokhoz: az idegen kulcs nem a numerikus
+azonosítóra, hanem a kódoszlopra mutat (a \texttt{HasPrincipalKey} beállítással), így az
+adatbázis-rekordok és az API-válaszok önmagukban is olvashatók. A kapcsolótáblák
+(\texttt{SocietyMember}, \texttt{SocietyMembershipRequest}) \emph{összetett elsődleges kulcsot}
+kapnak a társaság- és felhasználó-azonosító párosából, ami sémaszinten zárja ki a duplikált
+tagságot és kérelmet. Az üzleti egyediséget \emph{egyedi indexek} garantálják (felhasználói és
+társasági e-mail-cím, társasági szerepnév, hirdetéskategória-név, valamint a térképi pontoknál a
+poligon-, illetve útvonal-azonosító és a \texttt{Seq} sorszám párosa). A létrehozási időbélyegek
+(\texttt{CreatedAt}, \texttt{JoinedAt}) adatbázisoldali \texttt{sysdatetime()} alapértéket kapnak.
+Végül a hirdetéseknél egy \emph{ellenőrző megszorítás} (\texttt{CK\_Ads\_SingleOwner}) mondja ki,
+hogy minden hirdetésnek pontosan egy tulajdonosa van: vagy felhasználó, vagy társaság, de sosem
+mindkettő vagy egyik sem. A teljes adatmodellt a~\ref{fig:er-diagram}.~ábra foglalja össze; az
+egyes tartományok entitásait a megfelelő funkciófejezetek adatmodell-alfejezetei részletezik.
+
+% TODO: E-01 ábra (figures/e-01-er-diagram.pdf) — teljes ER-diagram, Mermaid erDiagram kódból
+% generálható a HuntingContext.cs alapján; egész oldalas, fekvő tájolás javasolt.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][9cm][c]{0.95\textwidth}{\centering E-01: A VadászNet adatbázis ER-diagramja
+	(elkészítendő) -- Identity-mag + társasági, hirdetési, hír-, napló- és térképi tartomány}}
+	\caption{A VadászNet adatbázis entitás--kapcsolat diagramja}
+	\label{fig:er-diagram}
+\end{figure}
+
+\subsection{Törlési viselkedések}
+
+A kapcsolatok törlési viselkedését a kontextus kapcsolatonként, kifejezetten rögzíti; ez a
+relációs integritás szempontjából a modell egyik legfontosabb tervezési döntéssorozata.
+A~\ref{tab:delete-behavior}.~táblázat a három alkalmazott viselkedés szerint csoportosítva
+tekinti át a kapcsolatokat.
+
+\begin{table}[htbp]
+	\centering
+	\caption{Törlési viselkedések a \texttt{HuntingContext} kapcsolataiban}
+	\label{tab:delete-behavior}
+	\begin{tabular}{|l|p{10.2cm}|}
+		\hline
+		\textbf{Viselkedés} & \textbf{Kapcsolatok} \\
+		\hline
+		\texttt{Cascade} &
+		tagság és kérelem a társaság felől; tagság a felhasználó felől; társasági bejegyzés a
+		társaság és a szerző felől; hirdetés a tulajdonos felhasználó, illetve társaság felől;
+		hirdetéskép a hirdetés felől; hír a társaság és a szerző felől; naplóbejegyzés a
+		felhasználó felől; térképi objektum a társaság felől; poligon- és útvonalpont a
+		poligon, illetve útvonal felől \\
+		\hline
+		\texttt{Restrict} &
+		tagság a társasági szerep felől; kérelem a kérelmező felhasználó felől; hirdetés a
+		kategória és a státusz felől; hír a láthatósági kód felől; térképi objektum a
+		létrehozó felhasználó, az ikontípus és a láthatósági kód felől \\
+		\hline
+		\texttt{SetNull} &
+		a társaság \texttt{OwnerUserId} kulcsa a tulajdonos felhasználó törlésekor; a kérelem
+		\texttt{ProcessedByUserId} kulcsa az elbíráló törlésekor \\
+		\hline
+	\end{tabular}
+\end{table}
+
+A mintázat következetes logikát tükröz. A \emph{tartalmazási} viszonyokban (a hirdetés képei, a
+poligon pontjai, a társaság bejegyzései) a szülő törlése kaszkádban viszi magával a gyermekeket,
+mert azok a szülő nélkül értelmezhetetlenek. A \emph{hivatkozási} viszonyokban -- ahol a
+hivatkozott rekord megosztott kódtábla- vagy törzsadat-elem -- a \texttt{Restrict} akadályozza meg,
+hogy egy még használatban lévő kategória, státusz vagy szerep eltűnjön a hivatkozó rekordok alól.
+A \texttt{SetNull} ott jelenik meg, ahol a kapcsolat elvesztése nem érvényteleníti a rekordot:
+a társaság a tulajdonosa nélkül is létező szervezet marad, az elbírált kérelem pedig az elbíráló
+fiókjának megszűnése után is őrzi az állapotát. Megjegyzendő ugyanakkor egy aszimmetria: a térképi
+objektumoknál a létrehozó felhasználóra mutató kulcs \texttt{Restrict} viselkedésű, vagyis a
+felhasználó mindaddig nem törölhető, amíg térképi objektuma van -- miközben naplóbejegyzései és
+hirdetései kaszkádban törlődnének. Ez a gyakorlatban azt jelenti, hogy az adminisztrátori
+felhasználótörlés térképi tartalommal rendelkező fióknál adatbázishibára fut; a \texttt{Restrict}
+viselkedésre a térképfejezet adatmodell-alfejezete (\ref{sec:map-adatmodell}.~alfejezet) is kitér.
+
+\subsection{Migrációk}
+
+A séma evolúcióját öt EF Core migráció írja le, amelyek egyben a fejlesztés idővonalát is
+dokumentálják:
+
+\begin{enumerate}[nosep]
+	\item \texttt{InitialIdentity} (2025.~október) -- az Identity-alapú felhasználókezelés,
+	      valamint a társasági, hirdetési, hír- és naplótartomány kezdeti sémája;
+	\item \texttt{AddMapEntities} (2025.~november) -- a térképi entitások (láthatóságok,
+	      ikontípusok, jelölők, poligonok, útvonalak és pontjaik) bevezetése;
+	\item \texttt{SocietyAccountsAndPosts} (2025.~november) -- a társasági fiókok és a
+	      társasági bejegyzések támogatása;
+	\item \texttt{RenameIdentityTables} (2025.~december) -- az \texttt{AspNet*} táblanevek
+	      lecserélése a beszédes nevekre;
+	\item \texttt{AddDescriptionToMapPolygon} (2026.~március) -- leírásmező a térképi
+	      poligonokhoz.
+\end{enumerate}
+
+A fejlesztői munkafolyamatban a migrációk a \texttt{dotnet ef migrations add} paranccsal
+készülnek, alkalmazásukhoz azonban nincs szükség kézi \texttt{dotnet ef database update}
+futtatásra: az alkalmazás indulásakor a kezdeti adatfeltöltés első lépése a
+\texttt{Database.MigrateAsync()} hívás, amely a még hiányzó migrációkat automatikusan érvényesíti.
+Ez a megoldás fejlesztői és demonstrációs környezetben kényelmes -- az adatbázis a backend első
+indításával üzemkész --, éles, többpéldányos környezetben ugyanakkor a telepítéshez kötött,
+ellenőrzött migrációfuttatás lenne indokolt.
+
+\subsection{Kezdeti adatfeltöltés}
+
+A \texttt{SeedData.SeedAsync} statikus metódus (\texttt{Data/SeedData.cs}) az alkalmazás minden
+indulásakor lefut, és a migrációk érvényesítése után feltölti az adatbázist a működéshez és a
+bemutatáshoz szükséges adatokkal. A feltöltés kétféle adatot érint. A \emph{törzsadatok} a rendszer
+működéséhez szükségesek: a három alkalmazásszintű szerep (\emph{Administrator},
+\emph{SocietyManager}, \emph{Hunter}), négy hirdetésstátusz, három-három hír- és térképláthatósági
+kód, négy térképi ikontípus, négy társasági szerep (Vezető, Gazda, Vadőr, Tag) és tizenkét
+hirdetéskategória. A \emph{demonstrációs adatok} a felületek bemutatását szolgálják: tizenegy
+felhasználó (egy adminisztrátor és tíz vadász), nyolc vadásztársaság, tagsági kapcsolatok, hét
+hirdetés képekkel, két hírbejegyzés és négy vadásznapló-bejegyzés.
+
+A feltöltés kulcstulajdonsága az \emph{idempotencia}: minden rekord beszúrását egy természetes
+kulcsra (e-mail-címre, névre, kódra vagy címre) szűrő létezés-ellenőrzés előzi meg, így az
+ismételt indítás nem duplikál adatot, a hiányzó elemeket viszont pótolja.
+A~\ref{lst:seed}.~kódrészlet ezt a mintát szemlélteti a társaságok feltöltésén.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={Idempotens adatfeltöltés a \texttt{SeedData} osztályban (kivonat)}, label={lst:seed}]
+private static async Task EnsureSocietiesAsync(HuntingContext context)
+{
+    var societies = new[]
+    {
+        new Society { Name = "Bakonyi Vadasztarsasag",
+                      Email = "kapcsolat@bakony-vt.example.hu", ... },
+        // ... tovabbi het tarsasag ...
+    };
+
+    foreach (var society in societies)
+    {
+        if (!await context.Societies.AnyAsync(s => s.Email == society.Email))
+        {
+            context.Societies.Add(society);
+        }
+    }
+}
+\end{lstlisting}
+
+A megoldás korlátaival együtt teljes a kép. A kezdő jelszavak (köztük az adminisztrátoré) a
+forráskódban szerepelnek, ami kizárólag fejlesztői környezetben elfogadható. A
+\emph{SocietyManager} szerep létrejön ugyan, de a feltöltött felhasználók egyike sem kapja meg: a
+nyolc demonstrációs társaság közvetlenül, tulajdonos felhasználói fiók nélkül kerül az adatbázisba
+(az \texttt{OwnerUserId} üresen marad, a kötelező \texttt{PasswordHash} mezőbe helykitöltő érték
+kerül), társasági fiók így csak a regisztrációs folyamaton keresztül keletkezik
+(\ref{chap:felhasznalok}.~fejezet). A hirdetésképek és a bejegyzésképek külső (Unsplash) URL-ekre
+mutatnak, nem a lokális feltöltési könyvtárra.
+
+\section{Backend-alapok}
+\label{sec:alapok-backend}
+
+\subsection{Az alkalmazás összeállítása}
+
+A backend egyetlen belépési pontja a \texttt{Program.cs}, amely a .NET 8 minimál hoszting
+modelljét követi: felső szintű utasításokkal, külön \texttt{Startup} osztály nélkül építi fel a
+szolgáltatáskonténert és a HTTP-csővezetéket. A~\ref{lst:program-bootstrap}.~kódrészlet a fájl
+szerkezetét mutatja a lényeges regisztrációkra és a middleware-sorrendre szűkítve.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={DI-regisztrációk és middleware-sorrend a \texttt{Program.cs}-ben (kivonat)}, label={lst:program-bootstrap}]
+builder.Services.AddDbContext<HuntingContext>(opts =>
+    opts.UseSqlServer(builder.Configuration
+        .GetConnectionString("DefaultConnection")));
+
+builder.Services.AddIdentityCore<ApplicationUser>(...)
+    .AddRoles<IdentityRole<int>>()
+    .AddEntityFrameworkStores<HuntingContext>()
+    .AddSignInManager();
+
+builder.Services.AddAuthentication(...).AddJwtBearer(...);
+builder.Services.AddCors(...);
+
+builder.Services.AddScoped(typeof(IGenericRepository<>),
+                           typeof(GenericRepository<>));
+builder.Services.AddScoped<IAdService, AdService>();
+builder.Services.AddScoped<ITokenService, JwtTokenService>();
+// ... tovabbi service-regisztraciok ...
+builder.Services.AddHttpClient<IOpenAiService, OpenAiService>();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
+app.UseHttpsRedirection();
+app.UseStaticFiles();      // wwwroot/uploads kiszolgalasa
+app.UseCors("Frontend");
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+
+await SeedData.SeedAsync(app.Services);
+app.Run();
+\end{lstlisting}
+
+A szolgáltatásregisztrációk három csoportra oszthatók. Az \emph{infrastruktúra-szolgáltatások}
+közé tartozik az adatbázis-kontextus, az Identity (jelszókezelés, szerepkezelés,
+\texttt{SignInManager}) és a JWT-bearer hitelesítés. Az Identity jelszószabályzata szándékosan
+enyhített: hat karakteres minimumhossz mellett sem kis- és nagybetűt, sem számjegyet, sem
+speciális karaktert nem követel meg -- ez a demonstrációs célú használatot könnyíti, éles
+üzemben szigorítandó. Az \emph{üzleti szolgáltatások} scoped életciklussal regisztrált
+interfész--implementáció párok (\texttt{IAdService}, \texttt{IUserService},
+\texttt{ISocietyService}, \texttt{IMapService}, \texttt{ITokenService}), kiegészítve a nyitott
+generikus \texttt{IGenericRepository<>} regisztrációval. A \emph{külső integrációt} az
+\texttt{IOpenAiService} képviseli, amely típusos \texttt{HttpClient}-ként
+(\texttt{AddHttpClient}) regisztrálódik, így a keretrendszer kezeli a HTTP-kapcsolatok
+életciklusát (\ref{chap:chatbot}.~fejezet).
+
+A kontrollerek JSON-szerializációja négy globális beállítást kap: a navigációs tulajdonságok
+okozta körkörös hivatkozásokat a \texttt{ReferenceHandler.IgnoreCycles} vágja el, a \texttt{null}
+értékű mezők kimaradnak a válaszokból, a szerializálási mélység legfeljebb 16 szint, a felsorolt
+típusok pedig a \texttt{JsonStringEnumConverter} révén nevükkel (nem numerikus értékükkel)
+utaznak -- így lesz a fióktípus a kliens számára \texttt{"Person"} vagy \texttt{"Society"}. A
+\texttt{Frontend} nevű CORS-házirend a Vite fejlesztői kiszolgáló
+(\texttt{http(s)://localhost:5173}) származási helyét engedélyezi tetszőleges fejléccel és
+metódussal; a házirend a csővezetékben a hitelesítés \emph{előtt} fut le, így a böngészői
+előkérések (preflight) tokenek nélkül is sikeresek. A middleware-sorrend további tagjai a
+HTTPS-átirányítás, a statikus fájlok kiszolgálása (ez teszi elérhetővé a feltöltött képeket
+tartalmazó \texttt{wwwroot/uploads} könyvtárat), majd a hitelesítés és a jogosultságkezelés. A
+fejlesztői környezetben a Swagger (OpenAPI) felület is bekapcsolódik, amely a teljes
+végpontkészletet dokumentálja és próbahívásokra is alkalmas
+(\ref{fig:swagger}.~ábra).
+
+% TODO: SC-17 képernyőkép (figures/sc-17-swagger.png) — Development módban, a végpontlistával.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-17: A Swagger UI a HUNting.API
+	végpontlistájával (elkészítendő)}}
+	\caption{A generált Swagger-felület fejlesztői környezetben}
+	\label{fig:swagger}
+\end{figure}
+
+\subsection{Rétegzés: kontrollerek, szolgáltatások és a repository-minta}
+
+A backend rétegzése a kontroller--szolgáltatás--adatelérés hármasra épül: a kontroller a
+HTTP-szintű feladatokat (útvonalillesztés, státuszkódok, jogosultság-ellenőrzés) látja el, az
+üzleti logika az interfész mögé rejtett szolgáltatásosztályokban él, az adatelérés pedig az EF
+Core kontextuson keresztül történik. A~\ref{fig:komponens}.~ábra a kontrollerek, szolgáltatások
+és a kontextus tényleges függőségi viszonyait mutatja.
+
+% TODO: A-03 ábra (figures/a-03-komponensek.pdf) — komponensdiagram a Program.cs regisztrációi
+% alapján: 8 controller → service-interfészek → HuntingContext; typed HttpClient → OpenAI.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][7cm][c]{0.9\textwidth}{\centering A-03: Backend-komponensdiagram
+	(elkészítendő) -- kontrollerek, szolgáltatások, \texttt{HuntingContext}, külső OpenAI API}}
+	\caption{A backend komponensei és függőségeik}
+	\label{fig:komponens}
+\end{figure}
+
+Fontos azonban rögzíteni, hogy a rétegzés nem egységes. Az \texttt{AdService} közvetlenül a
+\texttt{HuntingContext}-tel dolgozik; a \texttt{SocietyService} vegyesen használja a kontextust
+és a generikus repositoryt; a hírek kontrollere pedig szolgáltatásréteg nélkül, közvetlenül a
+kontextusra épül. A \texttt{GenericRepository<T>} maga is kompromisszumos konstrukció: a
+\texttt{GetByIdAsync} metódus futásidőben, az EF metaadataiból és kifejezésfák építésével állítja
+elő a kulcs szerinti szűrőfeltételt, ezért kizárólag egyszerű, egész típusú elsődleges kulcsú
+entitásokkal működik -- az összetett kulcsú kapcsolótáblákra nem alkalmazható --, továbbá a
+\texttt{SaveAsync} metódus révén a perzisztálás (a \emph{unit of work} felelősség) is a
+repositoryba csúszik. A dolgozat ezért a továbbiakban \emph{részleges} repository-mintáról
+beszél: ahol egy funkciófejezet a generikus repositoryt használja, ott ezt külön jelzi.
+
+\subsection{A JWT-infrastruktúra}
+
+A hitelesítés állapotmentes, JSON Web Token alapú. A konfiguráció \texttt{Jwt} szakaszát a
+\texttt{JwtOptions} beállításosztály (\texttt{Configuration/JwtOptions.cs}) képezi le, amely a
+szimmetrikus aláírókulcsot, a kibocsátót (\texttt{HUNting.API}), a célközönséget
+(\texttt{HUNting.Client}) és a token élettartamát (alapértelmezetten 60 perc) hordozza. A
+bejövő kérések \texttt{Authorization} fejlécében érkező bearer-tokent a JWT-bearer middleware dolgozza
+fel: ellenőrzi a kibocsátót, a célközönséget és az aláírást, a lejáratnál pedig mindössze
+egyperces órakülönbséget tolerál. Sikeres validáció esetén a token claimjeiből előáll a kérés
+identitása, amelyre a kontrollerek \texttt{[Authorize]} attribútumai és erőforrás-szintű
+ellenőrzései épülnek. A tokenek \emph{kibocsátását} (a claimkészletet és az aláírást) a
+felhasználókezelési fejezet (\ref{chap:felhasznalok}.~fejezet) mutatja be; ott esik szó a
+megoldás korlátairól -- így a frissítő token és a tokenvisszavonás hiányáról -- is. Az
+\texttt{appsettings.json}-ban tárolt aláírókulcs fejlesztői helykitöltő; éles környezetben
+titokkezelő szolgáltatásból vagy környezeti változóból kellene érkeznie.
+
+\subsection{Közös megvalósítási minták és a végpontkészlet}
+
+Három megvalósítási minta a legtöbb kontrollerben visszatér, ezért itt kerül bemutatásra.
+
+\paragraph{Validáció és hibakezelés.} Minden kontrollert az \texttt{[ApiController]} attribútum
+jelöl, így a modellkötési és validációs hibákra a keretrendszer automatikusan 400-as választ ad.
+A bemeneti szabályok első vonala az entitásokon elhelyezett DataAnnotations attribútumkészlet
+(\texttt{[Required]}, \texttt{[MaxLength]} és társaik), amelyet az üzleti szabályok
+kontrollerbeli, imperatív ellenőrzései egészítenek ki; a szolgáltatásrétegből érkező
+\texttt{ArgumentException} jellegű hibákat a kontrollerek try/catch blokkjai fordítják 400-as
+válaszra. Központi kivételkezelő middleware nincs: a nem kezelt kivétel a keretrendszer
+alapértelmezett 500-as válaszát eredményezi.
+
+\paragraph{Fájlfeltöltés.} A hirdetésképek, a társasági képek és a naplóképek feltöltése azonos
+sémát követ: a végpontot a \texttt{[RequestSizeLimit(10\_485\_760)]} attribútum 10~MiB-ra
+korlátozza; a kiterjesztés fehérlistán (\texttt{.jpg}, \texttt{.jpeg}, \texttt{.png},
+\texttt{.webp}) ellenőrződik; a fájl ütközésmentes, GUID-alapú nevet kap, és a
+\texttt{wwwroot/uploads} tartományspecifikus alkönyvtárába (\texttt{ads}, \texttt{societies},
+\texttt{logs}) kerül; az adatbázisban csak a relatív URL tárolódik, amelyet a statikus
+fájl-middleware szolgál ki; a rekord törlésekor a hozzá tartozó fájl is törlődik. A minta
+korlátja, hogy a tartalom-ellenőrzés a kiterjesztésre szorítkozik (a fájl tényleges MIME-típusát
+a szerver nem vizsgálja), és a feltöltéskezelő segédkód kontrollerenként duplikálódik.
+
+\paragraph{A végpontkészlet.} Az API nyolc kontrollere összesen 49 végpontot kínál;
+a~\ref{tab:endpoint-osszes}.~táblázat ezek megoszlását összegzi. A részletes végponttáblák --
+hozzáférési szabályokkal együtt -- az egyes funkciófejezetekben találhatók.
+
+\begin{table}[htbp]
+	\centering
+	\caption{A HUNting.API kontrollerei és végpontjaik}
+	\label{tab:endpoint-osszes}
+	\begin{tabular}{|l|l|c|l|}
+		\hline
+		\textbf{Kontroller} & \textbf{Útvonalprefix} & \textbf{Végpont} & \textbf{Fejezet} \\
+		\hline
+		\texttt{AuthController} & \texttt{/api/Auth} & 4 & \ref{chap:felhasznalok}. \\
+		\hline
+		\texttt{UsersController} & \texttt{/api/Users} & 5 & \ref{chap:felhasznalok}. \\
+		\hline
+		\texttt{AdsController} & \texttt{/api/Ads} & 9 & \ref{chap:hirdetesek}. \\
+		\hline
+		\texttt{SocietiesController} & \texttt{/api/Societies} & 11 & \ref{chap:tarsasagok}. \\
+		\hline
+		\texttt{NewsController} & \texttt{/api/News} & 5 & \ref{chap:tarsasagok}. \\
+		\hline
+		\texttt{HuntingLogsController} & \texttt{/api/HuntingLogs} & 5 & \ref{chap:naplo}. \\
+		\hline
+		\texttt{MapController} & \texttt{/api/Map} & 9 & \ref{chap:terkep}. \\
+		\hline
+		\texttt{ChatController} & \texttt{/api/Chat} & 1 & \ref{chap:chatbot}. \\
+		\hline
+		\multicolumn{2}{|l|}{\textbf{Összesen}} & \textbf{49} & \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\section{Frontend-alapok}
+\label{sec:alapok-frontend}
+
+\subsection{Belépési pont és provider-fa}
+
+A kliensalkalmazás belépési pontja a \texttt{main.tsx}, amely a React 18 \texttt{createRoot}
+API-jával, \texttt{StrictMode} burokban csatolja fel az \texttt{App} komponenst. Az \texttt{App}
+(\texttt{App.tsx}) nem tartalmaz megjelenítési logikát: kizárólag az alkalmazást átfogó
+szolgáltatók (providerek) fáját építi fel, amelyet a~\ref{fig:provider-fa}.~ábra szemléltet.
+Legkívül a React Query \texttt{QueryClientProvider} áll, ezen belül az \texttt{AuthProvider}
+biztosítja a hitelesítési állapotot, majd egy \texttt{Suspense} határ és a React Router
+\texttt{RouterProvider} következik.
+
+% TODO: FE-01 ábra (figures/fe-01-provider-fa.pdf) — fa-ábra: main → StrictMode → App →
+% QueryClientProvider → AuthProvider → Suspense → RouterProvider → AppLayout/AuthLayout → oldalak.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6cm][c]{0.85\textwidth}{\centering FE-01: A frontend provider- és
+	layoutfája (elkészítendő)}}
+	\caption{A kliensalkalmazás provider-hierarchiája és elrendezésrétegei}
+	\label{fig:provider-fa}
+\end{figure}
+
+A szerverállapot kezelését a React Query végzi; a megosztott \texttt{queryClient} példány
+(\texttt{lib/queryClient.ts}) három alapértelmezést rögzít: a lekérdezések eredménye egy percig
+frissnek számít (\texttt{staleTime}), az ablakfókusz visszatérése nem vált ki újralekérést, a
+sikertelen kérések pedig nem ismétlődnek automatikusan. A funkciómodulok konvenciója egységes: a
+lekérdezések tartományspecifikus kulcsokkal (például \texttt{["ads", filters]}) regisztrálódnak,
+a mutációk pedig sikeres lefutás után a \texttt{queryClient.invalidateQueries} hívással
+érvénytelenítik az érintett kulcsok gyorsítótárát, így a felület automatikusan újratölti a friss
+adatokat. Az \texttt{AuthProvider} és a mögötte álló \texttt{authStorage} modul működését -- a
+token és a profil \texttt{localStorage}-beli tárolását, a munkamenet helyreállítását -- a
+felhasználókezelési fejezet (\ref{chap:felhasznalok}.~fejezet) részletezi.
+
+\subsection{Útvonalak és elrendezések}
+
+Az útvonalkezelést a React Router \texttt{createBrowserRouter} hívása konfigurálja
+(\texttt{routes/appRouter.tsx}), két elrendezés (layout) köré szervezve. Az \texttt{AppLayout}
+a tartalmi oldalak kerete: rögzített fejlécet (\texttt{AppHeader}), legfeljebb \texttt{6xl}
+szélességű tartalmi sávot, láblécet és -- minden oldalon elérhető, lebegő elemként -- a
+chatbotot (\ref{chap:chatbot}.~fejezet) tartalmazza. Az \texttt{AuthLayout} a bejelentkezési és
+regisztrációs oldal középre igazított kerete. A~\ref{tab:routes}.~táblázat a teljes
+útvonaltáblát összegzi.
+
+\begin{table}[htbp]
+	\centering
+	\caption{A kliensalkalmazás útvonalai}
+	\label{tab:routes}
+	\begin{tabular}{|l|l|l|}
+		\hline
+		\textbf{Útvonal} & \textbf{Oldal} & \textbf{Elrendezés} \\
+		\hline
+		\texttt{/} & \texttt{HomePage} & AppLayout \\
+		\hline
+		\texttt{/ads}, \texttt{/ads/new}, \texttt{/ads/:adId}, & hirdetésoldalak & AppLayout \\
+		\texttt{/ads/:adId/edit} & & \\
+		\hline
+		\texttt{/societies}, \texttt{/societies/mine}, & társaságoldalak & AppLayout \\
+		\texttt{/societies/manage}, \texttt{/societies/:societyId} & & \\
+		\hline
+		\texttt{/map} & \texttt{MapPage} & AppLayout \\
+		\hline
+		\texttt{/logs} & \texttt{HuntingLogsPage} & AppLayout \\
+		\hline
+		\texttt{/weather} & \texttt{WeatherPage} & AppLayout \\
+		\hline
+		\texttt{/profile} & \texttt{ProfilePage} & AppLayout \\
+		\hline
+		\texttt{/admin} & \texttt{AdminDashboardPage} & AppLayout \\
+		\hline
+		\texttt{/auth/login}, \texttt{/auth/register} & hitelesítési oldalak & AuthLayout \\
+		\hline
+		\texttt{*} & \texttt{NotFoundPage} & -- \\
+		\hline
+	\end{tabular}
+\end{table}
+
+Az ismeretlen útvonalakat egy globális, mindenre illeszkedő szabály és az \texttt{AppLayout}
+\texttt{errorElement} beállítása egyaránt a \texttt{NotFoundPage} oldalra tereli. Két őszinte
+megjegyzés kívánkozik ide. Egyrészt a router minden oldalkomponenst statikusan importál, azaz
+\emph{nincs} kódszintű lusta betöltés (lazy loading): az \texttt{App} \texttt{Suspense} határa
+jelenleg tartalék, egy későbbi kódfelbontás (code splitting) előkészítése, a teljes alkalmazás
+egyetlen csomagban töltődik le. Másrészt az útvonaltábla nem tartalmaz központi útvonalőrt
+(route guard): a védett oldalak hozzáférés-ellenőrzése oldalszinten, az egyes komponensekben
+történik, ahogyan azt a felhasználókezelési fejezet bemutatja.
+
+\subsection{API-kommunikáció}
+
+A backenddel folytatott minden kommunikáció egyetlen megosztott axios-példányon, az
+\texttt{apiClient}-en (\texttt{lib/apiClient.ts}) keresztül zajlik. Az alap-URL feloldása
+háromlépcsős: ha a \texttt{VITE\_API\_BASE\_URL} környezeti változó be van állítva, az
+érvényesül; fejlesztői módban az alapértelmezés a \texttt{https://localhost:5001/api} cím;
+éles buildben a relatív \texttt{/api} útvonal. Megjegyzendő, hogy a backend fejlesztői profilja
+valójában a 7003-as HTTPS-porton fut (\texttt{launchSettings.json}), így a fejlesztői
+alapértelmezés önmagában nem talál célba -- a helyi fejlesztés a környezeti változó beállítását
+igényli; ez a kódbázis ismert, javításra váró pontja. A példány viselkedésének magját a két
+elfogó (interceptor) adja, amelyet a~\ref{lst:apiclient}.~kódrészlet mutat be.
+
+\begin{lstlisting}[caption={Az \texttt{apiClient} kérés- és válasz-elfogója (kivonat)}, label={lst:apiclient}]
+apiClient.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("hunting.accessToken");
+      localStorage.removeItem("hunting.user");
+      window.location.href = "/auth/login";
+    }
+    if (error.response?.data?.message) {
+      return Promise.reject(new Error(error.response.data.message));
+    }
+    // ... tovabbi hibauzenet-agak ...
+  }
+);
+\end{lstlisting}
+
+A kérés-elfogó a \texttt{localStorage}-ban tárolt hozzáférési tokent minden kimenő kérés
+\texttt{Authorization} fejlécébe befűzi \texttt{Bearer} sémával, így az egyes funkciómodulok
+API-hívásainak nem kell a hitelesítéssel foglalkozniuk. A válasz-elfogó két feladatot lát el:
+a 401-es státuszú válaszokra globálisan reagál (törli a hitelesítési adatokat, és a
+bejelentkezési oldalra irányít), minden más hibát pedig egységes \texttt{Error} objektummá
+normalizál, a szerver \texttt{message} vagy \texttt{title} mezőjét részesítve előnyben -- a hívó
+komponensek így mindig megjeleníthető hibaüzenetet kapnak. A modul harmadik közös eleme a
+\texttt{resolveAssetUrl} segédfüggvény, amely a backend által visszaadott relatív képútvonalakat
+(például \texttt{/uploads/ads/...}) teljes URL-lé egészíti ki az API gyökércíme alapján, az
+abszolút (külső) URL-eket pedig változatlanul hagyja; ezt minden képet megjelenítő funkció
+használja.
+
+\subsection{Megjelenés és reszponzivitás}
+
+A felület a Tailwind CSS 4-es verziójára épül, amelyben a téma nem külön konfigurációs fájlban,
+hanem a globális stíluslapon (\texttt{index.css}), a \texttt{@theme} direktívával van definiálva.
+A színvilág a vadászati tematikához igazodik: sötét erdőzöld alapszínek (háttér:
+\texttt{\#111a13}, kártyák: \texttt{\#1f2a1f}) és arany-borostyán kiemelőszín
+(\texttt{\#c3832f}) alkotják, a törzsszöveg az Inter, a címsorok a Playfair Display betűtípust
+használják, a hátteret pedig rétegzett sugaras és lineáris színátmenet mélyíti. A reszponzivitás
+mobil-első elvet követ, és a fejlécen figyelhető meg a legjobban: az \texttt{md} töréspont felett
+vízszintes navigációs sáv és gombsor jelenik meg, alatta ezek elrejtőznek, és egy
+hamburgermenü-gomb nyitja a lenyíló, érintésbarát navigációt. A fejléc rögzített, áttetsző,
+elmosott hátterű sáv, a navigációs elemek pedig a bejelentkezett felhasználó fióktípusa és
+szerepei szerint bővülnek (egyéni fióknál a „Társaságaim” és a „Naplók”, társasági fióknál a
+„Társaságom”, adminisztrátornál az „Admin” menüpont). Megjegyzendő, hogy a felület magyar
+feliratainak egy része jelenleg ékezet nélkül szerepel a forráskódban; ez ismert, javításra váró
+szépséghiba.
+
+% TODO: SC-01 képernyőkép (figures/sc-01-home-responsive.png) — főoldal desktop ÉS mobil
+% nézetben egymás mellett; a mobil nézeten a hamburgermenü látszódjon.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.85\textwidth}{\centering SC-01: A főoldal asztali és mobil
+	nézetben (elkészítendő)}}
+	\caption{A főoldal reszponzív megjelenése asztali és mobil nézetben}
+	\label{fig:home-responsive}
+\end{figure}
+
+A fentiekben bemutatott alapréteg -- az egységes adatbázis-kontextus, a \texttt{Program.cs}-ben
+összeállított backend-csővezeték és a provider-fára épülő kliensváz -- adja azt a közös nyelvet,
+amelyre a következő fejezetek funkciónként építkeznek: mindegyikük az itt leírt mintákat
+(JWT-validáció, \texttt{[Authorize]}, fájlfeltöltés, React Query-konvenciók,
+\texttt{apiClient}) példányosítja a saját tartományára.

@@ -1,0 +1,101 @@
+% !TeX root = ../main.tex
+% 8. fejezet — Vadásznapló
+% Hivatkozott források: Backend/HUNting.API/Controllers/HuntingLogsController.cs,
+%   Models/Hunting/HuntingLog.cs, Data/HuntingContext.cs,
+%   Frontend/HUNting/src/services/huntingLogsApi.ts, pages/HuntingLogs/HuntingLogsPage.tsx
+
+\chapter{Vadásznapló}
+\label{chap:naplo}
+
+A vadásznapló a hagyományos, papíralapú lőjegyzék digitális megfelelője: az egyéni vadász saját,
+személyes nyilvántartása a vadászatairól. A funkció a gerinc legkompaktabb tagja, ugyanakkor jól
+példázza a fióktípus szerinti korlátozást és az adminisztrátori hatókör-kiterjesztést, ezért a
+dolgozat külön fejezetben tárgyalja.
+
+\section{A funkció célja és felhasználói működése}
+\label{sec:log-cel}
+
+A napló kizárólag bejelentkezett, egyéni (\texttt{Person}) fiókkal érhető el: vendég látogatót az
+oldal a bejelentkezésre irányít, társasági fióknak pedig magyarázó üzenetet jelenít meg. A
+felhasználó időrendben -- a vadászat időpontja szerint csökkenő sorrendben -- látja saját
+bejegyzéseit, amelyek kártyái lenyitva mutatják a részleteket: helyszín, vadfaj, jegyzetek és a
+csatolt fénykép. Új bejegyzés a lista fölötti űrlapon rögzíthető: kötelező a vadászat időpontja,
+opcionális a helyszín, a vadfaj, a jegyzet és egy fénykép, amelyhez a felület azonnali előnézetet
+ad. A bejegyzések szigorúan személyesek: minden felhasználó csak a sajátjait látja, az
+adminisztrátor azonban -- kizárólag az API \texttt{scope=all} paraméterével -- a teljes
+naplóállományt is lekérdezheti.
+
+% TODO: SC-10 képernyőkép (figures/sc-10-hunting-logs.png) — lista + nyitott űrlap képelőnézettel.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-10: A vadásznapló oldala (elkészítendő)}}
+	\caption{A vadásznapló bejegyzéslistája és az új bejegyzés űrlapja}
+	\label{fig:hunting-logs-screen}
+\end{figure}
+
+\section{Adatmodell}
+\label{sec:log-adatmodell}
+
+A funkciót egyetlen entitás szolgálja ki, a \texttt{HuntingLog}
+(\texttt{Models/Hunting/HuntingLog.cs}), amely az adatbázisban \texttt{LogId} oszlopnévre képezett
+kulccsal rendelkezik. A bejegyzés a vadászat időpontját (\texttt{OccurredAt}), a helyszín szöveges
+megnevezését és opcionális koordinátáit, a vadfajt (\texttt{AnimalType}), a lövés tényét
+(\texttt{ShotFired}), szabad szöveges jegyzetet, a csatolt kép útvonalát, valamint a társasági
+megosztás szándékát jelző \texttt{ShareWithSociety} kapcsolót tárolja, a rögzítés időbélyegével
+együtt. A bejegyzés a felhasználóhoz kötelező idegen kulccsal kapcsolódik, és a fiók törlésekor
+kaszkádolva törlődik -- a napló a fiók része, önálló életciklusa nincs. Más entitással a
+naplónak nincs kapcsolata, ami a funkció személyes jellegét az adatmodell szintjén is tükrözi.
+
+\section{Backend-megvalósítás}
+\label{sec:log-backend}
+
+A \texttt{HuntingLogsController} a kisebb kontrollerek közé tartozik, és -- az
+\texttt{AuthController}-hez hasonlóan -- nem dedikált szolgáltatáson, hanem közvetlenül a
+\texttt{HuntingContext}-en dolgozik; a rétegzés e pontján a projekt az egyszerűséget választotta a
+szigorú egységesség helyett. Mind az öt végpontja \texttt{[Authorize]} attribútummal védett.
+
+A listázó végpont alapértelmezetten a hívó saját bejegyzéseire szűr. A hatókör kiterjesztése két
+feltétel együttes teljesüléséhez kötött: a hívónak \emph{Administrator} szerepben kell lennie,
+\emph{és} a kérésben kis- és nagybetűtől függetlenül meg kell adnia a \texttt{scope=all}
+paramétert -- adminisztrátor paraméter nélkül tehát szintén csak a saját naplóját látja. Az
+egyedi lekérdezés, a módosítás és a törlés a már ismert erőforrás-tulajdonos mintát követi:
+tulajdonos vagy adminisztrátor férhet hozzá, egyébként a válasz 403-as.
+
+A létrehozó végpont többrészes űrlapot fogad (\texttt{HuntingLogCreateRequest}, 10~MiB
+kéréslimittel), és két ponton tér el a sablontól. Egyrészt fióktípus-korlátot érvényesít: a token
+\texttt{account\_type} claimje alapján a társasági fiók kérését hibával utasítja el, mivel a
+naplóvezetés az egyéni vadász tevékenysége. Másrészt a kép mentése a bejegyzés mentése
+\emph{előtt} történik, így érvénytelen fájl esetén az adatbázis érintetlen marad; a képkezelés a
+közös mintát követi (kiterjesztés-fehérlista, GUID fájlnév, \texttt{uploads/logs} célkönyvtár).
+Mentés után a kontroller betölti a bejegyzés felhasználó-navigációját, hogy a 201-es válasz a
+megjelenítéshez szükséges szerzőadatokat is tartalmazza. Törléskor -- a hirdetésekhez hasonlóan --
+a lemezen tárolt képfájl is törlődik, így nem marad árva állomány a webgyökérben.
+
+\section{Frontend-megvalósítás, adatfolyam és korlátok}
+\label{sec:log-frontend}
+
+A \texttt{HuntingLogsPage} a hozzáférést két lépcsőben ellenőrzi: hitelesítetlen látogatót
+átirányít, nem \texttt{Person} fiókot szöveges üzenettel zár ki, és a \texttt{["huntingLogs"]}
+lekérdezést is csak jogosult felhasználónál engedélyezi (\texttt{enabled} feltétel). Az űrlap
+kontrollált mezőkkel dolgozik; az időpontmező \texttt{datetime-local} típusú, kezdőértéke a
+helyi időzónára igazított aktuális idő, beküldéskor pedig ISO-formátumra alakul. A fájlválasztó
+csak \texttt{image/} MIME-típusú fájlt fogad el, az előnézethez objektum-URL-t képez, és azt a
+csere vagy a komponens leszerelése után felszabadítja.
+
+A beküldés a \texttt{huntingLogsApi.create} függvényen át \texttt{FormData} tartalomként utazik,
+a mezőneveket a backend kötési neveire képezve. Siker esetén a kliens nem érvénytelenítéssel,
+hanem közvetlen gyorsítótár-frissítéssel reagál: az új bejegyzést a \texttt{setQueryData}
+hívással a lista elejére fűzi, így a felület újabb hálózati kérés nélkül, azonnal mutatja a
+friss adatot -- kis adatmennyiségnél ez gyorsabb és olcsóbb, mint az újratöltés. Ezt követően az
+űrlap bezárul és alaphelyzetbe áll.
+
+A funkció ismert korlátai jól körülhatárolhatók. A kliens a \texttt{ShotFired} és a
+\texttt{ShareWithSociety} mezőt jelenleg rögzített \texttt{false} értékkel küldi -- a felületen
+nincs hozzájuk vezérlőelem --, és a \texttt{ShareWithSociety} jelzőt a rendszer más pontja sem
+dolgozza fel: a társasági megosztás az adatmodellben előkészített, de végponttal és felülettel még
+nem támogatott képesség. A backend módosító és törlő végpontjai készen állnak, ám a felület nem
+kínál hozzájuk szerkesztő- vagy törlőműveletet, ahogy az adminisztrátori \texttt{scope=all}
+lekérdezéshez sem tartozik nézet. Végül a listázás lapozás nélküli: a személyes napló várható
+mérete mellett ez elfogadható, de hosszú távon a hirdetéseknél bemutatott lapozott minta
+átvétele indokolt. Ezek a pontok a továbbfejlesztési irányok között
+(\ref{chap:osszefoglalas}.~fejezet) jelennek meg újra.

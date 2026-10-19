@@ -43,16 +43,22 @@
 \maketitle
 \tableofcontents
 
-% --- A gerinc előtti keretfejezetek (1--4.) később készülnek el; ---
-% --- a rájuk mutató \ref-ek addig ??-ként jelennek meg.          ---
+% --- Minden fejezet elkészült; a számozás természetes. ---
 
-\setcounter{chapter}{4} % amíg az 1--4. fejezet hiányzik, így a következő fejezet 5-ösként számozódik
-
+\include{chapters/01_bevezetes}
+\include{chapters/02_technologiak}
+\include{chapters/03_architektura}
+\include{chapters/04_kozos_rendszeralapok}
 \include{chapters/05_felhasznalokezeles}
-% \include{chapters/06_hirdetesek}        % következő fejezet
-% \include{chapters/07_tarsasagok}
-% \include{chapters/08_vadasznaplo}
-% \include{chapters/09_terkep}
-% \include{chapters/10_chatbot_idojaras}
+\include{chapters/06_hirdetesek}
+\include{chapters/07_tarsasagok}
+\include{chapters/08_vadasznaplo}
+\include{chapters/09_terkep}
+\include{chapters/10_chatbot_idojaras}
+\include{chapters/11_teszteles}
+\include{chapters/12_osszefoglalas}
+
+\bibliographystyle{plain}
+\bibliography{references}
 
 \end{document}

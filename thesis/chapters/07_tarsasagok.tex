@@ -1,0 +1,276 @@
+% !TeX root = ../main.tex
+% 7. fejezet — Vadásztársaságok és tagságkezelés
+% Hivatkozott források: Backend/HUNting.API/Controllers/SocietiesController.cs, NewsController.cs,
+%   Services/SocietyService.cs, Models/Societies/*, Data/HuntingContext.cs, Data/SeedData.cs,
+%   Frontend/HUNting/src/services/societiesApi.ts, pages/Societies/SocietiesPage.tsx,
+%   SocietyDetailPage.tsx, SocietyManagementPage.tsx, MySocietiesPage.tsx
+
+\chapter{Vadásztársaságok és tagságkezelés}
+\label{chap:tarsasagok}
+
+A vadásztársasági funkciócsoport a HUNting közösségi magja: itt találkozik a két fióktípus. Az
+egyéni vadászok társaságokat kereshetnek és tagfelvételüket kérhetik, a társasági fiókok pedig a
+kérelmek elbírálásával, a taglistával és a belső bejegyzésekkel igazgatják közösségüket. A fejezet
+a tagfelvételi kérelem életciklusára mint a rendszer legjellegzetesebb üzleti folyamatára
+összpontosít, zárásként pedig tisztázza a hírfolyam (NewsFeed) jelenlegi, részlegesen megvalósított
+állapotát.
+
+\section{A funkció célja és felhasználói működése}
+\label{sec:soc-cel}
+
+A társaságkatalógus nyilvános: a látogató név szerint szűrhető listában böngészheti a regisztrált
+társaságokat, és megnyithatja bármelyik profilját, amely a bemutatkozást, az elérhetőségeket, az
+alapítás dátumát és a taglétszámot mutatja. Bejelentkezett, egyéni fiókkal rendelkező felhasználó a
+profiloldalról tagfelvételi kérelmet nyújthat be, opcionális bemutatkozó üzenettel. A kérelemről a
+társaság tulajdonosa dönt a társaságkezelő felületen, ahol a függőben lévő jelentkezések, a
+taglista és a belső posztok is egy helyen érhetők el. Elfogadás után az új tag a „Társaságaim”
+oldalon látja tagságait, és társaságot választva olvashatja annak belső bejegyzéseit -- a posztok
+tehát csak a tagság megszerzése után válnak láthatóvá.
+
+% TODO: SC-05 és SC-06 képernyőkép (figures/sc-05-societies.png, sc-06-society-detail.png)
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-05/SC-06: A társaságkatalógus és a társasági profil a jelentkezési űrlappal (elkészítendő)}}
+	\caption{A társaságkatalógus és egy társaság profilja a tagfelvételi űrlappal}
+	\label{fig:societies-screens}
+\end{figure}
+
+\section{Adatmodell}
+\label{sec:soc-adatmodell}
+
+A funkciócsoport öt entitásra épül (\texttt{Models/Societies/}). A \texttt{Society} a társaság
+törzsadatait tárolja (egyedi indexszel védett e-mail-cím, név, telefonszám, bemutatkozás,
+létrehozási idő), és a~\ref{chap:felhasznalok}.~fejezetben bemutatott módon egy-egy kapcsolatban
+áll tulajdonos felhasználójával. A társaságon belüli rangokat a \texttt{SocietyRole} szótártábla
+írja le; a kezdeti adatfeltöltés négy szerepet hoz létre (Vezeto, Gazda, Vador, Tag).
+
+A tagságot a \texttt{SocietyMember} kapcsolótábla valósítja meg, amely a klasszikus több-a-többhöz
+mintát követi, de a puszta kapcsolaton túl attribútumokat is hordoz: a tag társaságon belüli
+szerepét és a csatlakozás időpontját. Elsődleges kulcsa összetett -- a
+\texttt{(SocietyId, UserId)} pár --, ami adatbázisszinten zárja ki, hogy ugyanaz a felhasználó
+kétszer legyen tagja ugyanannak a társaságnak (\ref{lst:member-config}.~kódrészlet). Ugyanilyen
+összetett kulcsú a \texttt{SocietyMembershipRequest} entitás is, vagyis egy felhasználóhoz
+társaságonként legfeljebb egy kérelemrekord tartozhat; az ebből következő „újranyitási” viselkedést
+a~\ref{sec:soc-backend}.~alfejezet mutatja be. A kérelem állapotát a
+\texttt{MembershipRequestStatus} felsorolt típus írja le (\texttt{Pending}, \texttt{Approved},
+\texttt{Rejected}), emellett a rekord az elbírálás időpontját és az elbíráló azonosítóját is
+rögzíti.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={A tagsági kapcsolótábla konfigurációja a \texttt{HuntingContext} osztályban (kivonat)}, label={lst:member-config}]
+modelBuilder.Entity<SocietyMember>()
+    .HasKey(x => new { x.SocietyId, x.UserId });
+
+modelBuilder.Entity<SocietyMember>()
+    .HasOne(x => x.Society)
+    .WithMany(x => x.Members)
+    .HasForeignKey(x => x.SocietyId)
+    .OnDelete(DeleteBehavior.Cascade);
+
+modelBuilder.Entity<SocietyMember>()
+    .HasOne(x => x.User)
+    .WithMany(x => x.Societies)
+    .HasForeignKey(x => x.UserId)
+    .OnDelete(DeleteBehavior.Cascade);
+
+modelBuilder.Entity<SocietyMember>()
+    .HasOne(x => x.Role)
+    .WithMany(x => x.Members)
+    .HasForeignKey(x => x.RoleId)
+    .OnDelete(DeleteBehavior.Restrict);
+\end{lstlisting}
+
+A törlési szabályok a rekord jellegéhez igazodnak: a tagság a társasággal és a felhasználóval
+együtt kaszkádolva törlődik, a szerephivatkozás viszont \texttt{Restrict}, így használatban lévő
+társasági szerep nem távolítható el. A kérelemnél árnyaltabb a kép: a társaság törlése a
+kérelmeket is viszi, a kérelmező felhasználó törlése tiltott, amíg kérelme létezik
+(\texttt{Restrict}), az elbíráló törlésekor pedig a hivatkozás \texttt{SetNull} értékre vált --
+a döntés ténye tehát az elbíráló fiókjának megszűnése után is megmarad. A belső bejegyzéseket a
+\texttt{SocietyPost} entitás tárolja (cím, tartalom, opcionális képútvonal, szerző, időbélyeg),
+amely a társasággal és a szerzővel együtt kaszkádolva törlődik.
+
+% TODO: E-02 osztálydiagram (figures/e-02-society-domain.pdf) — ApplicationUser, Society,
+%       SocietyMember, SocietyMembershipRequest, SocietyRole, SocietyPost kapcsolatokkal.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering E-02: A társasági domain UML-osztálydiagramja (elkészítendő)}}
+	\caption{A társasági domain entitásai és kapcsolataik}
+	\label{fig:society-domain}
+\end{figure}
+
+\section{Backend-megvalósítás}
+\label{sec:soc-backend}
+
+A funkciót a \texttt{SocietiesController} és a \texttt{SocietyService} párosa valósítja meg. A
+szolgáltatás e funkciónál kettős adatelérést használ: a társaság-törzsadatok írását az
+\texttt{IGenericRepository<Society>} generikus tárolón keresztül végzi, az összetettebb
+lekérdezéseket és a kapcsolótáblák kezelését viszont közvetlenül a \texttt{HuntingContext}-en --
+ez a dolgozatban már jelzett részleges repository-minta legjobb példája. A végpontokat
+a~\ref{tab:soc-endpoints}.~táblázat összegzi.
+
+\begin{table}[htbp]
+	\centering
+	\caption{A \texttt{SocietiesController} végpontjai}
+	\label{tab:soc-endpoints}
+	\begin{tabular}{|l|l|p{5.2cm}|}
+		\hline
+		\textbf{Végpont} & \textbf{Hozzáférés} & \textbf{Feladat} \\
+		\hline
+		GET \texttt{/api/Societies} & anonim & Társaságok listája \\
+		\hline
+		GET \texttt{/api/Societies/\{id\}} & anonim & Egy társaság részletei \\
+		\hline
+		GET \texttt{/api/Societies/my} & bejelentkezett & A hívó tagságai \\
+		\hline
+		GET \texttt{/api/Societies/\{id\}/members} & tulajdonos v. admin & Taglista \\
+		\hline
+		POST \texttt{/api/Societies/\{id\}/join} & bejelentkezett Person & Tagfelvételi kérelem \\
+		\hline
+		GET \texttt{/api/Societies/\{id\}/requests} & tulajdonos v. admin & Függő kérelmek \\
+		\hline
+		POST \texttt{.../requests/\{userId\}/approve} & tulajdonos v. admin & Kérelem elfogadása \\
+		\hline
+		POST \texttt{.../requests/\{userId\}/reject} & tulajdonos v. admin & Kérelem elutasítása \\
+		\hline
+		GET \texttt{/api/Societies/\{id\}/posts} & tag, tulajdonos v. admin & Belső posztok \\
+		\hline
+		POST \texttt{/api/Societies/\{id\}/posts} & tulajdonos v. admin & Poszt létrehozása képpel \\
+		\hline
+		DELETE \texttt{.../posts/\{postId\}} & tulajdonos v. admin & Poszt törlése \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\subsection{A tagfelvételi kérelem életciklusa}
+
+A jelentkezési végpont először a fióktípust ellenőrzi: a token \texttt{account\_type} claimjéből
+megállapítja, hogy a hívó társasági fiók-e, és ha igen, elutasítja a kérést -- társaság nem
+csatlakozhat másik társasághoz. Ezután a szolgáltatás a kérelem állapotgépét hajtja végre
+(\ref{lst:join-lifecycle}.~kódrészlet): ha a hívó már tag, a kérés hibával zárul; ha van függőben
+lévő kérelme, szintén; ha viszont van korábbi -- elfogadott vagy elutasított -- kérelemrekordja,
+azt a rendszer \emph{újranyitja}: az állapotot \texttt{Pending} értékre állítja, frissíti az
+üzenetet és a beadás időpontját, az elbírálási mezőket pedig kiüríti. Új rekord csak akkor jön
+létre, ha a felhasználónak még egyáltalán nem volt kérelme az adott társaságnál -- ezt a
+megoldást az összetett kulcs kényszeríti ki, amely társaságonként és felhasználónként egyetlen
+kérelemrekordot enged.
+
+\begin{lstlisting}[language={[Sharp]C}, caption={A kérelem létrehozása és újranyitása a \texttt{SocietyService} osztályban (kivonat)}, label={lst:join-lifecycle}]
+var existingMember = await _ctx.SocietyMembers
+    .AnyAsync(m => m.SocietyId == societyId && m.UserId == userId);
+if (existingMember)
+{
+    throw new InvalidOperationException("Mar tagja vagy a tarsasagnak.");
+}
+
+var request = await _ctx.SocietyMembershipRequests.FindAsync(societyId, userId);
+if (request != null)
+{
+    if (request.Status == MembershipRequestStatus.Pending)
+    {
+        throw new InvalidOperationException("Mar van fuggoben levo kerelmed.");
+    }
+
+    request.Status = MembershipRequestStatus.Pending;
+    request.Message = message;
+    request.CreatedAt = DateTime.UtcNow;
+    request.ProcessedAt = null;
+    request.ProcessedByUserId = null;
+}
+else
+{
+    request = new SocietyMembershipRequest { /* ... */ };
+    _ctx.SocietyMembershipRequests.Add(request);
+}
+\end{lstlisting}
+
+Az elbírálás a tulajdonos vagy adminisztrátor kiváltsága, amit a kontroller közös
+\texttt{IsOwnerOrAdmin} segédmetódusa ellenőriz. Az elfogadó művelet idempotens: már elfogadott
+kérelemre nem fut le újra. Sikeres elfogadáskor a kérelem állapota \texttt{Approved} lesz, a
+rekord rögzíti az elbírálót és az időpontot, majd -- ha a felhasználó időközben nem lett tag --
+létrejön a tagsági rekord az alapértelmezett „Tag” társasági szereppel (ennek hiányában az első
+elérhető szereppel). Az elutasítás csak az állapotot és az elbírálási mezőket írja; a korábban
+bemutatott újranyitási szabály miatt az elutasított jelentkező később újra próbálkozhat. A teljes
+életciklust a~\ref{fig:request-lifecycle}.~ábra foglalja össze.
+
+% TODO: F-02 állapotdiagram (figures/f-02-request-lifecycle.pdf) — (nincs) → Pending →
+%       Approved / Rejected → újranyitás Pendingre.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5.5cm][c]{0.9\textwidth}{\centering F-02: A tagfelvételi kérelem állapotdiagramja (elkészítendő)}}
+	\caption{A tagfelvételi kérelem életciklusa}
+	\label{fig:request-lifecycle}
+\end{figure}
+
+\subsection{Belső bejegyzések}
+
+A posztok olvasási joga szélesebb, mint az írási: a listát a társaság bármely tagja, a tulajdonos
+és az adminisztrátor kérheti le -- a kontroller a tagságot és a tulajdonlást közvetlen
+adatbázis-lekérdezéssel ellenőrzi --, új posztot viszont csak a tulajdonos vagy adminisztrátor
+hozhat létre. A poszt többrészes kérésben érkezik (cím, tartalom, opcionális kép, 10~MiB
+kéréslimittel), a képkezelés pedig a hirdetéseknél megismert mintát követi:
+kiterjesztés-fehérlista, GUID fájlnév, \texttt{uploads/societies} célkönyvtár. Poszt törlésekor a
+kontroller ellenőrzi, hogy a bejegyzés valóban az útvonalban megadott társasághoz tartozik-e,
+majd a képfájlt és a rekordot is eltávolítja.
+
+\section{Frontend-megvalósítás}
+\label{sec:soc-frontend}
+
+\subsection{Katalógus és jelentkezés}
+
+A katalógusoldal (\texttt{SocietiesPage}) a teljes társaságlistát kéri le, és a névszűrést --
+a lista mérete miatt elfogadható kompromisszumként -- kliensoldalon végzi. A profiloldal
+(\texttt{SocietyDetailPage}) a \texttt{["society", societyId]} kulcson kérdezi le az adatokat, és
+a jelentkezési űrlapot csak akkor jeleníti meg, ha a látogató bejelentkezett és fióktípusa
+\texttt{Person} -- ugyanaz a szabály, amelyet a backend a token claimjéből kikényszerít. A
+jelentkezés mutációja sikeres beküldés után visszaigazoló üzenetet jelenít meg és üríti az
+üzenetmezőt; a szerver által dobott üzleti hibák (már tag, már van függő kérelem) az űrlap
+hibaszövegeként jelennek meg.
+
+\subsection{Társaságkezelő és tagsági nézet}
+
+A társaságkezelő oldal (\texttt{SocietyManagementPage}) hozzáférési feltétele kliensoldalon is
+kettős: bejelentkezett, \texttt{Society} típusú fiók kell, amelyhez tartozik birtokolt társaság
+(\texttt{user.ownedSociety}) -- ennek hiányában az oldal magyarázó üzenetet jelenít meg. A
+társaság azonosítóját a tárolt profil \texttt{ownedSociety} mezőjéből veszi, és három párhuzamos
+lekérdezést indít: tagok (\texttt{["society-members", id]}), függő kérelmek
+(\texttt{["society-requests", id]}) és posztok (\texttt{["society-posts", id]}). A mutációk
+célzottan érvénytelenítik az érintett gyorsítótárakat: az elfogadás a kérelmek \emph{és} a tagok
+listáját is frissíti -- hiszen mindkettőt megváltoztatja --, az elutasítás csak a kérelmekét, a
+posztműveletek pedig a posztokét. Az új poszt űrlapja cím- és tartalommezőből, valamint natív
+fájlválasztóból áll; beküldés után a mezők kiürülnek.
+
+A tagsági nézet (\texttt{MySocietiesPage}) az egyéni fiókok tükörképe: a \texttt{["my-societies"]}
+lekérdezés a hívó tagságait adja vissza, a kiválasztott társaság posztjait pedig egy feltételesen
+engedélyezett lekérdezés (\texttt{enabled: Boolean(selectedSociety)}) tölti be -- így hálózati
+kérés csak akkor indul, amikor a felhasználó ténylegesen társaságot választott. A posztok képei a
+\texttt{resolveAssetUrl} segédfüggvényen keresztül kapják meg a backend abszolút címét.
+
+% TODO: SC-07 és SC-08 képernyőkép (figures/sc-07-society-manage.png, sc-08-my-societies.png)
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering SC-07/SC-08: A társaságkezelő és a „Társaságaim” oldal (elkészítendő)}}
+	\caption{A társaságkezelő felület a függő kérelmekkel, valamint a tagsági nézet a belső posztokkal}
+	\label{fig:society-manage-screens}
+\end{figure}
+
+\section{A hírfolyam (NewsFeed) állapota és a funkciócsoport korlátai}
+\label{sec:soc-news}
+
+A kódbázis a belső posztok mellett egy második, hasonló rendeltetésű entitáscsaládot is tartalmaz:
+a \texttt{NewsFeed} hírbejegyzést és a hozzá tartozó \texttt{NewsVisibility} láthatósági
+szótártáblát (\texttt{MEMBERS}, \texttt{PUBLIC}, \texttt{OFFICERS} kódokkal), két mintahírrel a
+kezdeti adatfeltöltésben. Fontos azonban őszintén rögzíteni a megvalósultság tényleges szintjét:
+a \texttt{NewsController} teljes CRUD-ot kínál, de \emph{egyetlen végpontján sincs autorizáció} --
+anonim hívó is létrehozhat, módosíthat és törölhet hírt --, a tárolt láthatósági kód szerinti
+szűrés nem valósul meg, a frontenden pedig a hírekhez semmilyen oldal vagy API-hívás nem tartozik
+(csupán egy előkészített típusdefiníció). A hírfolyam tehát \emph{backend-oldali előkészítésnek}
+tekintendő, nem működő felhasználói funkciónak; a dolgozat a tagok felé irányuló tényleges
+kommunikációs csatornaként a \texttt{SocietyPost} bejegyzéseket dokumentálja. A hiányzó
+autorizáció a rendszer ismert biztonsági adóssága, amelyet a továbbfejlesztési irányok között
+(\ref{chap:osszefoglalas}.~fejezet) a hírfolyam felhasználói felületével együtt kell rendezni.
+
+A funkciócsoport további ismert korlátai: a katalógusoldal kiemelt „Jelentkezés tagságra” gombjához
+jelenleg nem tartozik eseménykezelő -- a működő jelentkezési űrlap a profiloldalon él --; a
+taglistáról nincs tageltávolító felületi művelet (a szolgáltatásban a metódus elkészült, végpont
+nem tartozik hozzá); a társasági szerepek (Gazda, Vador) pedig a tagrekordban tárolódnak ugyan, de
+jogosultsági következményük jelenleg nincs -- a döntéseket minden ponton a tulajdonos-vagy-admin
+szabály vezérli.

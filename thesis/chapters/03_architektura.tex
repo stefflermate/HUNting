@@ -1,0 +1,156 @@
+% !TeX root = ../main.tex
+% 3. fejezet — Rendszerarchitektúra
+% A ftsrg/thesis-template-latex sablonba \include-dal illesztendő tartalomfájl.
+% Hivatkozott források: Backend/HUNting.API/Program.cs, Controllers/*, Services/*,
+%   Frontend/HUNting/src/lib/apiClient.ts, services/weatherService.ts, pages/Map/MapPage.tsx,
+%   components/Chatbot.tsx, thesis/planning/feature_matrix.md
+
+\chapter{Rendszerarchitektúra}
+\label{chap:architektura}
+
+Ez a fejezet madártávlatból mutatja be a HUNting felépítését: a rétegeket és felelősségeiket, a
+rétegek közötti kommunikáció szabályait, valamint azokat a tervezési döntéseket, amelyek a
+rendszer jelenlegi formáját meghatározzák. A cél a mérnöki szempontból pontos minősítés: a
+HUNting \emph{rétegzett monolit} -- nem mikroszolgáltatás-architektúra és nem is a Clean
+Architecture értelmében vett, szigorúan elválasztott rétegrendszer --, és a fejezet azt is
+megindokolja, hogy a projekt méretéhez és céljaihoz miért ez az ésszerű választás. A rétegek
+\emph{belső} felépítését (adatbázis-kontextus, DI, middleware, kliensváz) a
+\ref{chap:alapok}.~fejezet részletezi; itt a rétegek \emph{közötti} viszonyokra koncentrálunk.
+
+\section{A háromrétegű architektúra áttekintése}
+\label{sec:arch-attekintes}
+
+A rendszer klasszikus háromrétegű felépítést követ, amelyet
+a~\ref{fig:architektura}.~ábra szemléltet. A \emph{megjelenítési réteg} egy React-alapú
+egyoldalas alkalmazás (single-page application, SPA): a böngésző egyszer tölti le a statikus
+HTML-, JavaScript- és CSS-állományokat, ezt követően minden képernyőváltás kliensoldali
+útvonalkezeléssel, minden adatművelet aszinkron HTTP-hívással történik. Az \emph{üzleti réteg}
+egy ASP.NET Core 8 Web API, amely állapotmentes REST-végpontokon szolgálja ki a klienst: itt
+történik a hitelesítés és a jogosultság-ellenőrzés, az üzleti szabályok érvényesítése és a
+feltöltött fájlok kezelése. Az \emph{adatréteg} egy Microsoft SQL Server adatbázis (fejlesztői
+környezetben LocalDB), amelyet a backend kizárólag az Entity Framework Core objektum-relációs
+leképezőn keresztül ér el -- kézzel írt SQL a kódbázisban nem fordul elő.
+
+% TODO: A-01 ábra (figures/a-01-architektura.pdf) — React SPA ↔ REST/JSON ↔ ASP.NET Core API ↔
+% EF Core ↔ MSSQL; külső API-k: OpenAI (szerveroldalról), Google Maps + OpenWeather (kliensről).
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][7cm][c]{0.9\textwidth}{\centering A-01: A HUNting háromrétegű
+	architektúrája a külső szolgáltatásokkal (elkészítendő)}}
+	\caption{A rendszer architektúrája: rétegek és külső integrációk}
+	\label{fig:architektura}
+\end{figure}
+
+A repository ezt a felépítést két fő projektben tükrözi: a \texttt{Backend/HUNting.API} az
+API-t és az adatelérést, a \texttt{Frontend/HUNting} a kliensalkalmazást tartalmazza; mindkettő
+mellett saját tesztprojekt, illetve tesztkönyvtár áll (\ref{chap:teszteles}.~fejezet). A két
+projekt között fordítási idejű függőség nincs: a kapcsolatot kizárólag a HTTP-határfelület és
+a JSON-formátum jelenti, a kliensoldali TypeScript-típusok a backend válaszformátumait kézzel
+tükrözik.
+
+A képet a külső szolgáltatások teszik teljessé, és itt egy architekturális szempontból fontos
+aszimmetria figyelhető meg. Az OpenAI Chat Completions API-t a backend hívja (a chatbot-kérések
+a saját \texttt{/api/Chat} végponton keresztül, szerveroldali API-kulccsal jutnak el az OpenAI
+felé), a Google Maps JavaScript API-t és az OpenWeather API-t viszont közvetlenül a kliens éri
+el, kliensoldali kulcsokkal. Ez utóbbi egyszerűbb megvalósítást adott, ára azonban a kulcsok
+böngészőbeli kitettsége; a kompromisszumot a~\ref{chap:chatbot}.~fejezet elemzi.
+
+A rendszer szereplőit és fő használati eseteit a~\ref{fig:usecase}.~ábra foglalja össze. A
+\emph{vendég} böngészheti a hirdetéseket, a társaságkatalógust és az időjárásoldalt, valamint
+használhatja a chatbotot; a \emph{vadász} (Person fiók) emellett hirdetést ad fel, társasági
+tagságot igényel, naplót vezet és térképi objektumokat kezel; a \emph{társasági fiók} (Society)
+a tagfelvételt bírálja el, bejegyzéseket és tagokat kezel; az \emph{adminisztrátor} a teljes
+felhasználó- és hirdetésállomány felett rendelkezik.
+
+% TODO: U-01 ábra (figures/u-01-usecase.pdf) — Use Case diagram: Vendég, Vadász (Person),
+% Társasági fiók (Society), Adminisztrátor aktorok a 6 funkcióterület fő eseteivel.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][7cm][c]{0.9\textwidth}{\centering U-01: A HUNting használati esetei
+	(elkészítendő)}}
+	\caption{A rendszer szereplői és fő használati esetei}
+	\label{fig:usecase}
+\end{figure}
+
+\section{REST API és adatfolyamok}
+\label{sec:arch-rest}
+
+A kliens és a szerver közötti határfelület a REST elveit követi~\cite{fielding2000}. Az
+erőforrásokat főnévi útvonalak azonosítják az egységes \texttt{api/[controller]} sémában
+(\texttt{/api/Ads}, \texttt{/api/Societies}, \texttt{/api/HuntingLogs}~stb.), a műveletet pedig
+a HTTP-ige hordozza: a \texttt{GET} lekérdez, a \texttt{POST} létrehoz (illetve alárendelt
+akciókat indít, például \texttt{POST /api/Societies/\{id\}/join}), a \texttt{PUT} teljes
+módosítást végez, a \texttt{DELETE} töröl. A válaszok a szabványos státuszkódokkal élnek:
+sikeres lekérdezésre 200, létrehozásra 201 (\texttt{Created}, a létrejött erőforrásra mutató
+hivatkozással), tartalom nélküli sikerre 204; a hibás kérés 400-at, a hiányzó vagy érvénytelen
+token 401-et, az elégtelen jogosultság 403-at, a nem létező erőforrás 404-et kap. A
+reprezentáció mindkét irányban JSON; a szerializáció globális beállításait (karakterlánc-alapú
+enumok, körkörös hivatkozások elvágása, \texttt{null} mezők elhagyása) a
+\ref{chap:alapok}.~fejezet mutatta be.
+
+Egy tipikus kérés életútját a~\ref{fig:request-flow}.~ábra követi végig. A kliensoldali
+funkciómodul az \texttt{apiClient} példányon indítja a hívást, amelynek kérés-elfogója befűzi
+a bearer-tokent. A kérés a szerveren a middleware-csővezetéken halad át: a CORS-ellenőrzés után
+a hitelesítési middleware validálja a tokent és felépíti a kérés identitását, a
+jogosultságkezelés kiértékeli az \texttt{[Authorize]} szabályokat, majd az útvonalillesztés a
+megfelelő kontrollerakciót hívja. Az akció az erőforrás-szintű ellenőrzések után a
+szolgáltatásrétegen keresztül az EF Core-ral fordul az adatbázishoz, az eredmény pedig
+JSON-válaszként utazik vissza, ahol a React Query gyorsítótárba kerül, és a komponensek
+deklaratívan megjelenítik. Hiba esetén a kliens válasz-elfogója lép közbe: a 401-es választ
+globális kijelentkeztetésként kezeli, minden mást egységes hibaüzenetté normalizál.
+
+% TODO: A-02 ábra (figures/a-02-keres-eletut.pdf) — folyamatábra: apiClient interceptor → CORS →
+% authentikáció → autorizáció → controller → service → EF Core → MSSQL → JSON válasz → React Query.
+\begin{figure}[htbp]
+	\centering
+	\fbox{\parbox[c][6.5cm][c]{0.9\textwidth}{\centering A-02: Egy REST-kérés életútja a
+	kliens-elfogótól az adatbázisig és vissza (elkészítendő)}}
+	\caption{Egy hitelesített REST-kérés feldolgozási folyamata}
+	\label{fig:request-flow}
+\end{figure}
+
+Az adatfolyamok szempontjából a rendszer három forgalomtípust bonyolít. A \emph{strukturált
+adatforgalom} a fenti JSON-séma szerint zajlik. A \emph{bináris forgalom} a képfeltöltésekre és
+-letöltésekre korlátozódik: a feltöltés \texttt{multipart/form-data} formátumú POST-kérés, a
+letöltés pedig a statikus fájl-middleware-en keresztül, a JSON-válaszokban kapott URL-ek alapján
+történik. Végül a \emph{külső forgalom} a chatbot-kérések továbbítása az OpenAI felé
+(szerveroldalon), illetve a térkép- és időjárásadatok lekérése (kliensoldalon).
+
+\section{Tervezési döntések és kompromisszumok}
+\label{sec:arch-dontesek}
+
+\paragraph{Monolit a mikroszolgáltatások helyett.} A backend egyetlen telepítési egység, közös
+adatbázissal. Egy hat funkcióterületből álló, egy fejlesztő által készített alkalmazásnál a
+mikroszolgáltatásokra bontás (szolgáltatásonkénti adatbázis, szolgáltatásközi kommunikáció,
+elosztott tranzakciók) aránytalan üzemeltetési és fejlesztési többletköltséget jelentene,
+miközben az előnyei -- független skálázás és telepítés -- itt nem jelentkeznének. A monoliton
+belül a funkcióterületek a kontroller--szolgáltatás--modell hármasok mentén így is jól
+elkülönülnek, ami a későbbi kiemelést nem zárja ki.
+
+\paragraph{Rétegzett monolit, nem Clean Architecture.} A rétegek elválasztása pragmatikus, nem
+dogmatikus: az entitásosztályok egyszerre szolgálnak adatbázis-leképezésként és -- több végpontnál
+-- API-válaszformátumként, a szolgáltatásréteg pedig nem mindenhol van jelen (a hírek kontrollere
+közvetlenül a kontextust használja). Külön tartományi réteg, interfészprojekt vagy
+DTO-leképező keretrendszer (például AutoMapper) nincs: ahol a válasz formátuma eltér az
+entitástól (például a hitelesítési válaszok), ott kézi leképezés történik. Ez a döntés
+csökkenti az absztrakciós rétegek számát és a kód mennyiségét, cserébe a séma és az API
+összefonódik: egy entitásmódosítás közvetlenül kihat a válaszformátumra. A dolgozat ezt az
+őszinte minősítést következetesen tartja: ahol egy fejezet a rétegzéstől való eltérést talál,
+ott azt jelzi (így a részleges repository-mintát a~\ref{sec:alapok-backend}.~alfejezet
+tárgyalja~\cite{fowler2002}).
+
+\paragraph{Oldalszintű védelem a kliensen.} A kliensoldali hozzáférés-védelem nem központi
+útvonalőrrel, hanem az egyes oldalkomponensekben valósul meg
+(\ref{sec:alapok-frontend}.~alfejezet). Ez a megközelítés egyszerű és oldalanként testre
+szabható (eltérő átirányítási célok, szerepkörfüggő nézetek), hátránya a szabályok szétszórtsága.
+Hangsúlyozandó ugyanakkor az architektúra alapelve: a kliensoldali védelem kizárólag felhasználói
+élményt szolgál, a tényleges hozzáférés-szabályozás minden esetben a szerveren történik -- a
+kliens megkerülésével indított kérések is a JWT-validáción és a szerepkör-, illetve
+tulajdonos-ellenőrzéseken buknak el.
+
+\paragraph{A funkcióközpontú dokumentálás indoklása.} A dolgozat szerkezete maga is tervezési
+döntés. Mivel a rendszer értéke a funkcióiban rejlik, és minden funkció ugyanazon a három
+rétegen ível át, a dokumentáció nem rétegenként (külön adatbázis-, backend- és
+frontend-fejezetekben), hanem funkciónként halad: az 5--10.~fejezet mindegyike az adatmodelltől
+a felhasználói felületig mutat be egy-egy funkciót. Így az összetartozó döntések egy helyen
+olvashatók, az ismétlődő infrastruktúra pedig a \ref{chap:alapok}.~fejezetben, egyszer szerepel.
